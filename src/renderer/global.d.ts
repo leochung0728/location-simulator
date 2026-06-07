@@ -22,6 +22,13 @@ interface SpotsBridge {
   importCsv(): Promise<{ ok: boolean; canceled?: boolean; added: number; skipped: number; errors: string[] }>;
 }
 
+interface RoutesBridge {
+  list(): Promise<SavedRoute[]>;
+  create(input: RouteInput): Promise<SavedRoute>;
+  update(id: string, changes: Partial<RouteInput>): Promise<SavedRoute>;
+  remove(id: string): Promise<{ ok: boolean }>;
+}
+
 declare global {
   type SpotType = 'flower' | 'mushroom' | 'hidden';
 
@@ -47,9 +54,32 @@ declare global {
     type: SpotType;
   }
 
+  interface RoutePoint {
+    lat: number;
+    lng: number;
+  }
+
+  interface SavedRoute {
+    id: string;
+    name: string;
+    points: RoutePoint[];
+    loop: boolean;
+    speedKmh?: number;
+    createdAt: number;
+    updatedAt: number;
+  }
+
+  interface RouteInput {
+    name: string;
+    points: RoutePoint[];
+    loop: boolean;
+    speedKmh?: number;
+  }
+
   interface Window {
     simulator: SimulatorBridge;
     spots: SpotsBridge;
+    routes: RoutesBridge;
   }
 
   // Leaflet 由 CDN 以全域 L 載入

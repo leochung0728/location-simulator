@@ -47,5 +47,15 @@ const spotsApi = {
 
 contextBridge.exposeInMainWorld('spots', spotsApi);
 
+const routesApi = {
+  list: () => ipcRenderer.invoke('routes:list'),
+  create: (input: unknown) => ipcRenderer.invoke('routes:create', input),
+  update: (id: string, changes: unknown) => ipcRenderer.invoke('routes:update', id, changes),
+  remove: (id: string) => ipcRenderer.invoke('routes:delete', id),
+};
+
+contextBridge.exposeInMainWorld('routes', routesApi);
+
 export type SimulatorBridge = typeof api;
 export type SpotsBridge = typeof spotsApi;
+export type RoutesBridge = typeof routesApi;

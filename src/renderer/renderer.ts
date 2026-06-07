@@ -35,6 +35,7 @@ const posIcon = L.divIcon({ className: '', html: '<div class="pos-marker"></div>
 map.on('click', (e: any) => {
   const pt = { lat: +e.latlng.lat.toFixed(6), lng: +e.latlng.lng.toFixed(6) };
   if (spotPickMode) { fillFormCoord(pt); return; }
+  if (routePickMode) { addRoutePointFromMap(pt); return; }
   if (currentState === 'running') return;
   addWaypoint(pt);
 });
@@ -468,3 +469,280 @@ window.addEventListener('mouseup', () => {
 // 收摺 / 展開
 $('btn-spots-collapse').addEventListener('click', () => setCollapsed(true));
 $('spots-expand').addEventListener('click', () => setCollapsed(false));
+
+/* ════════════════════════════════════════════════════════
+   分頁切換（地點 / 路線）
+   ════════════════════════════════════════════════════════ */
+$('panel-tabs').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest('.ptab') as HTMLElement | null;
+  if (!b) return;
+  const tab = b.dataset.tab;
+  document.querySelectorAll('.ptab').forEach((x) => x.classList.toggle('active', x === b));
+  $('tab-spots').style.display = tab === 'spots' ? 'flex' : 'none';
+  $('tab-routes').style.display = tab === 'routes' ? 'flex' : 'none';
+});
+
+/* ════════════════════════════════════════════════════════
+   路線庫
+   ════════════════════════════════════════════════════════ */
+const routesApi = window.routes;
+
+let allRoutes: SavedRoute[] = [];
+let routeEditId: string | null = null;     // null = 新路線
+let routePts: RoutePoint[] = [];            // 編輯器的工作座標
+let routePickMode = false;
+let routeEditMarkers: any[] = [];           // 編輯中座標點在地圖上的標記
+let routeEditLine: any = null;
+
+const routeEditIcon = (i: number) =>
+  L.divIcon({ className: '', html: `<div class="re-marker"><span>${i + 1}</span></div>`,
+    iconSize: [22, 22], iconAnchor: [11, 22] });
+
+function clearRouteEditPreview(): void {
+  routeEditMarkers.forEach((m) => map.removeLayer(m));
+  routeEditMarkers = [];
+  if (routeEditLine) { map.removeLayer(routeEditLine); routeEditLine = null; }
+}
+
+// 把編輯器目前的座標點畫到地圖（琥珀色，與正式航點的藍色區分）
+function drawRouteEditPreview(): void {
+  clearRouteEditPreview();
+  const pts = routePts.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  routeEditMarkers = pts.map((p, i) =>
+    L.marker([p.lat, p.lng], { icon: routeEditIcon(i) }).addTo(map),
+  );
+  if (pts.length > 1) {
+    const lls = pts.map((p) => [p.lat, p.lng]);
+    if (($('route-loop') as HTMLInputElement).checked) lls.push([pts[0].lat, pts[0].lng]);
+    routeEditLine = L.polyline(lls, { color: '#f59e0b', weight: 3, opacity: 0.85 }).addTo(map);
+  }
+}
+
+function fitRouteEdit(): void {
+  const pts = routePts.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (pts.length > 1) map.fitBounds(pts.map((p) => [p.lat, p.lng]), { padding: [50, 50] });
+  else if (pts.length === 1) map.panTo([pts[0].lat, pts[0].lng]);
+}
+
+function haversine(a: RoutePoint, b: RoutePoint): number {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+function routeDistanceKm(pts: RoutePoint[], loop: boolean): number {
+  let m = 0;
+  for (let i = 1; i < pts.length; i++) m += haversine(pts[i - 1], pts[i]);
+  if (loop && pts.length > 1) m += haversine(pts[pts.length - 1], pts[0]);
+  return m / 1000;
+}
+
+async function loadRoutes(): Promise<void> {
+  try { allRoutes = await routesApi.list(); } catch { allRoutes = []; }
+  renderRoutes();
+}
+
+function renderRoutes(): void {
+  const list = $('route-list');
+  $('route-count').textContent = allRoutes.length ? `(${allRoutes.length})` : '';
+  if (allRoutes.length === 0) {
+    list.innerHTML =
+      '<div class="empty-hint">尚無路線。在「多點路線」模式於地圖點航點後，按「從目前航點儲存」。</div>';
+    return;
+  }
+  list.innerHTML = allRoutes
+    .map((r) => {
+      const km = routeDistanceKm(r.points, r.loop);
+      const meta = `${r.points.length} 點 · 約 ${km.toFixed(km < 10 ? 2 : 1)} km${r.loop ? ' · ⟲循環' : ''}`;
+      return `<div class="route">
+        <div class="rbody">
+          <div class="rname">${esc(r.name)}</div>
+          <div class="rmeta">${esc(meta)}</div>
+        </div>
+        <div class="ract">
+          <button data-act="load" data-id="${r.id}" aria-label="載入到地圖" title="載入到地圖">⌖</button>
+          <button data-act="edit" data-id="${r.id}" aria-label="編輯" title="編輯">✎</button>
+          <button data-act="del" data-id="${r.id}" aria-label="刪除" title="刪除">🗑</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+}
+
+$('route-list').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button[data-act]') as HTMLElement | null;
+  if (!btn) return;
+  const r = allRoutes.find((x) => x.id === btn.dataset.id);
+  if (!r) return;
+  const act = btn.dataset.act;
+  if (act === 'load') loadRouteToMap(r);
+  else if (act === 'edit') openRouteForm(r);
+  else if (act === 'del') deleteRoute(r);
+});
+
+// 載入到地圖：切多點模式、灌入航點、代入循環與速度（速度可再自行調整）
+function loadRouteToMap(r: SavedRoute): void {
+  mode = 'multi-point';
+  document.querySelectorAll('.mode-btn').forEach((x) =>
+    x.classList.toggle('active', (x as HTMLElement).dataset.mode === 'multi-point'),
+  );
+  $('dpad-section').style.display = 'none';
+
+  waypoints = r.points.map((p) => ({ lat: p.lat, lng: p.lng }));
+  ($('loop') as HTMLInputElement).checked = r.loop;
+  if (r.speedKmh !== undefined) {
+    ($('speed') as HTMLInputElement).value = String(r.speedKmh);
+    $('speed-val').textContent = `${r.speedKmh} km/h`;
+  }
+  redrawWaypoints();
+  if (waypoints.length > 1) {
+    map.fitBounds(waypoints.map((p) => [p.lat, p.lng]), { padding: [40, 40] });
+  } else if (waypoints.length === 1) {
+    map.panTo([waypoints[0].lat, waypoints[0].lng]);
+  }
+  flash(`已載入路線「${r.name}」（速度 ${($('speed') as HTMLInputElement).value} km/h，可再調整）`);
+}
+
+async function deleteRoute(r: SavedRoute): Promise<void> {
+  await routesApi.remove(r.id);
+  await loadRoutes();
+}
+
+// ── 座標點編輯器 ──
+function renderRoutePoints(): void {
+  const el = $('route-points');
+  $('route-pt-count').textContent = routePts.length ? `(${routePts.length})` : '';
+  el.innerHTML =
+    routePts
+      .map(
+        (p, i) => `<div class="rpt" data-i="${i}">
+          <span class="ri">${i + 1}</span>
+          <input class="rlat" inputmode="decimal" value="${p.lat}" aria-label="緯度">
+          <input class="rlng" inputmode="decimal" value="${p.lng}" aria-label="經度">
+          <button data-act="up" title="上移">↑</button>
+          <button data-act="down" title="下移">↓</button>
+          <button data-act="del" title="刪除">✕</button>
+        </div>`,
+      )
+      .join('') || '<div class="empty-hint">尚無座標點。「新增點」或「從地圖點選」。</div>';
+  drawRouteEditPreview();
+}
+
+$('route-points').addEventListener('input', (e) => {
+  const row = (e.target as HTMLElement).closest('.rpt') as HTMLElement | null;
+  if (!row) return;
+  const i = +row.dataset.i!;
+  const t = e.target as HTMLInputElement;
+  if (t.classList.contains('rlat')) routePts[i].lat = parseFloat(t.value);
+  else if (t.classList.contains('rlng')) routePts[i].lng = parseFloat(t.value);
+  drawRouteEditPreview();
+});
+
+$('route-points').addEventListener('click', (e) => {
+  const btn = (e.target as HTMLElement).closest('button[data-act]') as HTMLElement | null;
+  if (!btn) return;
+  const row = btn.closest('.rpt') as HTMLElement;
+  const i = +row.dataset.i!;
+  const act = btn.dataset.act;
+  if (act === 'del') routePts.splice(i, 1);
+  else if (act === 'up' && i > 0) [routePts[i - 1], routePts[i]] = [routePts[i], routePts[i - 1]];
+  else if (act === 'down' && i < routePts.length - 1)
+    [routePts[i], routePts[i + 1]] = [routePts[i + 1], routePts[i]];
+  renderRoutePoints();
+});
+
+function addRoutePointFromMap(pt: LatLng): void {
+  routePts.push({ lat: pt.lat, lng: pt.lng });
+  renderRoutePoints();
+  flash(`已加入座標點（${routePts.length}），可繼續點或再按一次關閉選點`);
+}
+
+// ── 表單開關 ──
+function openRouteForm(route?: SavedRoute): void {
+  routeEditId = route?.id ?? null;
+  $('route-form-title').textContent = route ? '編輯路線' : '新路線';
+  ($('route-name') as HTMLInputElement).value = route?.name ?? '';
+  const spd = route?.speedKmh ?? +($('speed') as HTMLInputElement).value;
+  ($('route-speed') as HTMLInputElement).value = String(spd);
+  $('route-speed-val').textContent = String(spd);
+  ($('route-loop') as HTMLInputElement).checked = route?.loop ?? false;
+  routePts = (route?.points ?? []).map((p) => ({ lat: p.lat, lng: p.lng }));
+  renderRoutePoints();
+  fitRouteEdit();
+  $('route-form').style.display = 'block';
+  $('route-form').scrollIntoView({ behavior: 'smooth' });
+}
+function closeRouteForm(): void {
+  $('route-form').style.display = 'none';
+  routePickMode = false;
+  routeEditId = null;
+  clearRouteEditPreview();
+}
+$('route-loop').addEventListener('change', drawRouteEditPreview);
+
+$('btn-route-new').addEventListener('click', () => openRouteForm());
+$('btn-route-cancel').addEventListener('click', closeRouteForm);
+
+// 從目前地圖航點開新路線（名稱待輸入、帶入目前速度與循環）
+$('btn-route-from-wp').addEventListener('click', () => {
+  if (!waypoints.length) return flash('地圖上尚無航點');
+  routeEditId = null;
+  $('route-form-title').textContent = '新路線（來自目前航點）';
+  ($('route-name') as HTMLInputElement).value = '';
+  const spd = +($('speed') as HTMLInputElement).value;
+  ($('route-speed') as HTMLInputElement).value = String(spd);
+  $('route-speed-val').textContent = String(spd);
+  ($('route-loop') as HTMLInputElement).checked = ($('loop') as HTMLInputElement).checked;
+  routePts = waypoints.map((p) => ({ lat: p.lat, lng: p.lng }));
+  renderRoutePoints();
+  fitRouteEdit();
+  $('route-form').style.display = 'block';
+  $('route-form').scrollIntoView({ behavior: 'smooth' });
+});
+
+$('btn-route-addpt').addEventListener('click', () => {
+  const c = map.getCenter();
+  routePts.push({ lat: +c.lat.toFixed(6), lng: +c.lng.toFixed(6) });
+  renderRoutePoints();
+});
+$('btn-route-pickpt').addEventListener('click', () => {
+  routePickMode = !routePickMode;
+  flash(routePickMode ? '點地圖加入座標點（再按一次關閉）' : '已關閉選點');
+});
+$('btn-route-capture').addEventListener('click', () => {
+  if (!waypoints.length) return flash('地圖上尚無航點');
+  routePts = waypoints.map((p) => ({ lat: p.lat, lng: p.lng }));
+  renderRoutePoints();
+  flash(`已用目前 ${routePts.length} 個航點覆蓋`);
+});
+$('route-speed').addEventListener('input', (e) =>
+  ($('route-speed-val').textContent = (e.target as HTMLInputElement).value));
+
+$('btn-route-save').addEventListener('click', async () => {
+  const name = ($('route-name') as HTMLInputElement).value.trim();
+  const pts = routePts.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  if (!name) return flash('請輸入路線名稱');
+  if (pts.length < 2) return flash('路線至少需要兩個有效座標點');
+  const input: RouteInput = {
+    name,
+    points: pts,
+    loop: ($('route-loop') as HTMLInputElement).checked,
+    speedKmh: +($('route-speed') as HTMLInputElement).value,
+  };
+  try {
+    if (routeEditId) await routesApi.update(routeEditId, input);
+    else await routesApi.create(input);
+    closeRouteForm();
+    await loadRoutes();
+    flash('路線已儲存');
+  } catch (err) {
+    flash(`儲存失敗：${(err as Error).message}`);
+  }
+});
+
+loadRoutes();

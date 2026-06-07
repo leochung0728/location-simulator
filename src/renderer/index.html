@@ -73,6 +73,8 @@
   @keyframes ping{0%{box-shadow:0 0 0 0 rgba(45,212,191,.55)}70%{box-shadow:0 0 0 16px rgba(45,212,191,0)}100%{box-shadow:0 0 0 0 rgba(45,212,191,0)}}
   .wp-marker{width:22px;height:22px;border-radius:50% 50% 50% 0;background:var(--select);transform:rotate(-45deg);border:2px solid #0c0f14;display:flex;align-items:center;justify-content:center}
   .wp-marker span{transform:rotate(45deg);color:#0c0f14;font-weight:700;font-size:11px;font-family:var(--mono)}
+  .re-marker{width:22px;height:22px;border-radius:50% 50% 50% 0;background:#f59e0b;transform:rotate(-45deg);border:2px solid #0c0f14;display:flex;align-items:center;justify-content:center}
+  .re-marker span{transform:rotate(45deg);color:#0c0f14;font-weight:700;font-size:11px;font-family:var(--mono)}
   .map-hint{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:500;background:rgba(18,23,31,.92);border:1px solid var(--border);padding:8px 16px;border-radius:20px;font-size:12px;color:var(--muted);pointer-events:none;transition:opacity .3s;opacity:0}
 
   #spots-panel{width:340px;flex-shrink:0;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
@@ -106,6 +108,28 @@
   .form-grid input,.form-grid select{width:100%}
   .form-grid input[type=text],.form-grid input:not([type]){font-family:var(--ui);font-size:13px;padding:9px 10px;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--text)}
   .spi{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--signal);vertical-align:middle}
+  .panel-tabs{display:flex;gap:4px}
+  .ptab{font-family:var(--ui);font-size:14px;font-weight:500;padding:6px 14px;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);cursor:pointer}
+  .ptab:hover{color:var(--text)}
+  .ptab.active{color:var(--signal);border-bottom-color:var(--signal)}
+  #tab-spots,#tab-routes{display:flex;flex-direction:column;flex:1}
+  #route-list{display:flex;flex-direction:column;gap:7px}
+  .route{display:flex;align-items:center;gap:11px;padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:8px}
+  .route .rbody{flex:1;min-width:0}
+  .route .rname{font-size:13.5px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .route .rmeta{font-size:11.5px;color:var(--muted)}
+  .route .ract{display:flex;gap:2px}
+  .route .ract button{background:none;border:none;color:var(--faint);cursor:pointer;font-size:13px;padding:5px;border-radius:5px}
+  .route .ract button:hover{background:var(--surface-hi);color:var(--text)}
+  #route-points{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow-y:auto}
+  #route-points::-webkit-scrollbar{width:6px}#route-points::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+  .rpt{display:flex;align-items:center;gap:5px}
+  .rpt .ri{font-size:11px;color:var(--faint);width:16px;flex-shrink:0;text-align:center}
+  .rpt input{min-width:0;flex:1;font-family:var(--mono);font-size:11.5px;padding:6px 7px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text)}
+  .rpt button{background:none;border:none;color:var(--faint);cursor:pointer;font-size:12px;padding:4px;border-radius:4px;flex-shrink:0}
+  .rpt button:hover{background:var(--surface-hi);color:var(--text)}
+  .route-loop-row{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer}
+  .route-loop-row input[type=checkbox]{width:16px;height:16px;flex:none;margin:0;accent-color:var(--signal);cursor:pointer}
 </style>
 </head>
 <body>
@@ -190,10 +214,17 @@
 <aside id="spots-panel">
   <div class="head">
     <div class="spots-title-row">
-      <h1><i class="spi" data-i="pin"></i> 地點庫</h1>
+      <div class="panel-tabs" id="panel-tabs">
+        <button class="ptab active" data-tab="spots">地點</button>
+        <button class="ptab" data-tab="routes">路線</button>
+      </div>
       <button id="btn-spots-collapse" title="收摺面板" aria-label="收摺面板">›</button>
     </div>
-    <button class="btn wide" id="btn-spot-add" style="margin-top:10px">＋ 新增地點</button>
+  </div>
+
+  <div id="tab-spots">
+  <div class="section">
+    <button class="btn wide" id="btn-spot-add">＋ 新增地點</button>
     <button class="btn wide" id="btn-spot-import" style="margin-top:8px;font-size:13px">⭳ 匯入 CSV</button>
   </div>
 
@@ -249,6 +280,41 @@
       <button class="btn" id="btn-spot-cancel">取消</button>
     </div>
   </div>
+  </div><!-- /tab-spots -->
+
+  <div id="tab-routes" style="display:none">
+    <div class="section">
+      <button class="btn wide" id="btn-route-from-wp">＋ 從目前航點儲存</button>
+      <button class="btn wide" id="btn-route-new" style="margin-top:8px;font-size:13px">＋ 新路線</button>
+    </div>
+    <div class="section" style="flex:1">
+      <div class="label">路線 <span id="route-count" style="color:var(--faint)"></span></div>
+      <div id="route-list"></div>
+    </div>
+    <div class="section" id="route-form" style="display:none">
+      <div class="label" id="route-form-title">新路線</div>
+      <div class="form-grid">
+        <input id="route-name" placeholder="路線名稱" style="grid-column:1 / -1">
+        <div class="row" style="grid-column:1 / -1">
+          <span style="font-size:12px;color:var(--muted)">速度</span>
+          <input type="range" id="route-speed" min="1" max="500" step="1" value="60">
+          <span class="readout" id="route-speed-val">60</span>
+        </div>
+        <label class="route-loop-row" style="grid-column:1 / -1">
+          <input type="checkbox" id="route-loop"> 循環
+        </label>
+      </div>
+      <div class="label" style="margin-top:12px">座標點 <span id="route-pt-count" style="color:var(--faint)"></span></div>
+      <div id="route-points"></div>
+      <div class="form-grid" style="margin-top:8px">
+        <button class="btn" id="btn-route-addpt" style="font-size:12px">＋ 新增點</button>
+        <button class="btn" id="btn-route-pickpt" style="font-size:12px">⊕ 從地圖點選</button>
+        <button class="btn" id="btn-route-capture" style="grid-column:1 / -1;font-size:12px">⤓ 用目前地圖航點覆蓋</button>
+        <button class="btn go" id="btn-route-save">儲存</button>
+        <button class="btn" id="btn-route-cancel">取消</button>
+      </div>
+    </div>
+  </div><!-- /tab-routes -->
 </aside>
 
 <button id="spots-expand" title="展開地點庫" aria-label="展開地點庫">‹</button>

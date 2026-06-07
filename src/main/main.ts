@@ -10,11 +10,13 @@ import * as fs from 'node:fs';
 import { spawn, execSync } from 'node:child_process';
 import { SimulatorController } from './simulator-controller';
 import { SpotStore, type SpotInput } from './spot-store';
+import { RouteStore, type RouteInput } from './route-store';
 import type { Platform } from './core/device-adapter';
 import type { Route } from './core/movement-engine';
 
 let controller: SimulatorController | null = null;
 let spotStore: SpotStore | null = null;
+let routeStore: RouteStore | null = null;
 
 // ── Windows 自我提權（tunneld 需要系統管理員權限）──
 const ELEV_FLAG = '--elevated';
@@ -129,6 +131,17 @@ function registerIpc(): void {
       return { ok: false, added: 0, skipped: 0, errors: [`讀取失敗：${String(e)}`] };
     }
   });
+
+  // 路線庫
+  ipcMain.handle('routes:list', () => routeStore!.list());
+  ipcMain.handle('routes:create', (_e, input: RouteInput) => routeStore!.create(input));
+  ipcMain.handle('routes:update', (_e, id: string, changes: Partial<RouteInput>) =>
+    routeStore!.update(id, changes),
+  );
+  ipcMain.handle('routes:delete', (_e, id: string) => {
+    routeStore!.remove(id);
+    return { ok: true };
+  });
 }
 
 if (needsElevation()) {
@@ -138,6 +151,7 @@ if (needsElevation()) {
 } else {
   app.whenReady().then(() => {
     spotStore = new SpotStore();
+    routeStore = new RouteStore();
     registerIpc();
     createWindow();
     app.on('activate', () => {
