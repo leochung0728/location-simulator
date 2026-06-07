@@ -9,18 +9,12 @@ import sys
 def main() -> None:
     # 沿用呼叫端傳入的額外參數（保留彈性）
     sys.argv = ["pymobiledevice3", "remote", "tunneld", *sys.argv[1:]]
-    try:
-        import runpy
-        runpy.run_module("pymobiledevice3", run_name="__main__", alter_sys=True)
-    except SystemExit:
-        raise
-    except Exception:
-        # 退而求其次：直接呼叫 CLI 進入點（不同版本位置可能不同）
-        try:
-            from pymobiledevice3.__main__ import cli
-        except Exception:
-            from pymobiledevice3.cli.cli import cli  # type: ignore
-        cli()
+    # pymobiledevice3 的 CLI 進入點是 __main__:main（不同版本若改名，退回 cli）
+    import pymobiledevice3.__main__ as entry
+    fn = getattr(entry, "main", None) or getattr(entry, "cli", None)
+    if fn is None:
+        raise SystemExit("找不到 pymobiledevice3 的 CLI 進入點")
+    fn()
 
 
 if __name__ == "__main__":
