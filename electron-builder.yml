@@ -34,6 +34,8 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   gatekeeperAssess: false
+  # 凍結的 helper/tunneld 是單一架構 Mach-O，在通用版合併時照原樣保留（不做 lipo）。
+  x64ArchFiles: "**/helper/*"
   # 凍結的 helper / tunneld（CI 在 mac runner 上以 PyInstaller 產生）會打包到 resources/helper/
   extraResources:
     - from: helper-bin
