@@ -28,8 +28,15 @@ jobs:
 
       # 因為上一步跳過了腳本，這裡單獨執行 electron 的安裝程式，
       # 確保 Electron 執行檔有下載下來（electron-builder 需要它）。
+      # 加重試以容忍 GitHub 下載伺服器的暫時性逾時（504 等）。
       - name: Ensure Electron binary
-        run: node node_modules/electron/install.js
+        run: |
+          for i in 1 2 3 4 5; do
+            node node_modules/electron/install.js && break
+            echo "Electron 下載失敗（第 $i 次），15 秒後重試…"
+            sleep 15
+          done
+          test -d node_modules/electron/dist
 
       - name: Setup Python
         uses: actions/setup-python@v5
