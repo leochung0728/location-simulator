@@ -21,11 +21,13 @@ jobs:
         with:
           node-version: 20
 
+      # 用 --ignore-scripts 跳過所有套件的安裝腳本，避開專案 allow-scripts/
+      # lavamoat 的 postinstall 在 CI 上失敗的問題（本專案無原生模組，安全）。
       - name: Install dependencies
-        run: npm install
+        run: npm install --ignore-scripts
 
-      # 保險：若專案的 allow-scripts 機制擋掉了 electron 的安裝腳本，
-      # 直接執行 electron 的安裝程式，確保 Electron 執行檔有下載下來。
+      # 因為上一步跳過了腳本，這裡單獨執行 electron 的安裝程式，
+      # 確保 Electron 執行檔有下載下來（electron-builder 需要它）。
       - name: Ensure Electron binary
         run: node node_modules/electron/install.js
 
