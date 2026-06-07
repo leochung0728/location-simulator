@@ -50,10 +50,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pymobiledevice3 pyinstaller
-          pyinstaller --onefile --noconfirm --collect-all pymobiledevice3 \
+          pyinstaller --onefile --noconfirm \
+            --collect-all pymobiledevice3 --recursive-copy-metadata pymobiledevice3 \
             --name ios-location-helper --distpath helper-bin \
             --workpath /tmp/pyi-h --specpath /tmp/pyi-h python/ios-location-helper.py
-          pyinstaller --onefile --noconfirm --collect-all pymobiledevice3 \
+          pyinstaller --onefile --noconfirm \
+            --collect-all pymobiledevice3 --recursive-copy-metadata pymobiledevice3 \
             --name tunneld --distpath helper-bin \
             --workpath /tmp/pyi-t --specpath /tmp/pyi-t python/tunneld-launcher.py
           chmod +x helper-bin/ios-location-helper helper-bin/tunneld
