@@ -74,10 +74,16 @@ function createWindow(): void {
   let iosHelperExe: string | undefined;
   let iosTunnelExe: string | undefined;
   if (app.isPackaged) {
-    const helper = path.join(process.resourcesPath, 'helper', 'ios-location-helper.exe');
-    if (fs.existsSync(helper)) iosHelperExe = helper;
-    const tunnel = path.join(process.resourcesPath, 'helper', 'tunneld.exe');
-    if (fs.existsSync(tunnel)) iosTunnelExe = tunnel;
+    const ext = process.platform === 'win32' ? '.exe' : '';
+    // mac 的凍結二進位是 build 機器的架構（CI 為 arm64）。
+    // 在非該架構的 Mac（Intel）上不能跑，故略過、退回系統 python3 + pymobiledevice3。
+    const archOk = process.platform !== 'darwin' || process.arch === 'arm64';
+    if (archOk) {
+      const helper = path.join(process.resourcesPath, 'helper', `ios-location-helper${ext}`);
+      if (fs.existsSync(helper)) iosHelperExe = helper;
+      const tunnel = path.join(process.resourcesPath, 'helper', `tunneld${ext}`);
+      if (fs.existsSync(tunnel)) iosTunnelExe = tunnel;
+    }
   }
 
   controller = new SimulatorController(win, { iosScriptPath, iosHelperExe, iosTunnelExe });

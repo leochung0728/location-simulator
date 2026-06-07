@@ -34,6 +34,11 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   gatekeeperAssess: false
+  # 凍結的 helper / tunneld（CI 在 mac runner 上以 PyInstaller 產生）會打包到 resources/helper/
+  extraResources:
+    - from: helper-bin
+      to: helper
+      filter: ["**/*"]
 
 win:
   target:

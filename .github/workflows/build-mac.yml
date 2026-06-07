@@ -31,6 +31,27 @@ jobs:
       - name: Ensure Electron binary
         run: node node_modules/electron/install.js
 
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 用 PyInstaller 把 helper 與 tunneld 凍成自帶 Python+pymobiledevice3 的
+      # Mac 原生執行檔，放到 helper-bin/，electron-builder 會打包進 resources/helper/。
+      # 注意：runner 是 Apple Silicon，產出的是 arm64 二進位（見 main.ts 的架構判斷）。
+      - name: Freeze Python helpers (self-contained)
+        run: |
+          python -m pip install --upgrade pip
+          pip install pymobiledevice3 pyinstaller
+          pyinstaller --onefile --noconfirm --collect-all pymobiledevice3 \
+            --name ios-location-helper --distpath helper-bin \
+            --workpath /tmp/pyi-h --specpath /tmp/pyi-h python/ios-location-helper.py
+          pyinstaller --onefile --noconfirm --collect-all pymobiledevice3 \
+            --name tunneld --distpath helper-bin \
+            --workpath /tmp/pyi-t --specpath /tmp/pyi-t python/tunneld-launcher.py
+          chmod +x helper-bin/ios-location-helper helper-bin/tunneld
+          ls -la helper-bin
+
       # 直接呼叫 electron-builder 並明確 --publish never，
       # 避免它在 CI 偵測下自動嘗試發佈到 GitHub Releases（會要 token 而失敗）。
       - name: Build macOS app (unsigned, no publish)
