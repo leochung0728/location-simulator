@@ -31,10 +31,12 @@ jobs:
       - name: Ensure Electron binary
         run: node node_modules/electron/install.js
 
-      # 不做簽章：關掉自動尋找簽章身分，產出未簽章的 build（自用/測試用）。
-      # 要正式簽章+公證時，改用 CSC_LINK / CSC_KEY_PASSWORD 等 secrets。
-      - name: Build macOS app (unsigned)
-        run: npm run dist:mac
+      # 直接呼叫 electron-builder 並明確 --publish never，
+      # 避免它在 CI 偵測下自動嘗試發佈到 GitHub Releases（會要 token 而失敗）。
+      - name: Build macOS app (unsigned, no publish)
+        run: |
+          npm run build
+          npx electron-builder --mac --publish never
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
