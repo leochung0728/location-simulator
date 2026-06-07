@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>定位模擬器</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0c0f14;--panel:#12171f;--surface:#1a212c;--surface-hi:#222b38;--border:#29333f;
+    --text:#e7edf3;--muted:#8a97a6;--faint:#5a6675;--signal:#2dd4bf;--go:#4ade80;
+    --warn:#fbbf24;--stop:#f87171;--select:#60a5fa;
+    --mono:'JetBrains Mono',ui-monospace,monospace;--ui:'Archivo',system-ui,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{height:100%}
+  body{font-family:var(--ui);background:var(--bg);color:var(--text);display:flex;height:100vh;overflow:hidden}
+  #panel{width:348px;flex-shrink:0;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+  #panel::-webkit-scrollbar{width:8px}#panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .head{padding:18px 22px 14px;border-bottom:1px solid var(--border)}
+  .head h1{font-size:15px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;display:flex;align-items:center;gap:10px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--faint);transition:all .3s}
+  .dot.running{background:var(--go);box-shadow:0 0 10px 1px var(--go);animation:blink 1.4s infinite}
+  .dot.paused{background:var(--warn);box-shadow:0 0 8px 1px var(--warn)}
+  .dot.finished{background:var(--signal);box-shadow:0 0 8px 1px var(--signal)}
+  @keyframes blink{50%{opacity:.35}}
+  .head .sub{font-family:var(--mono);font-size:11px;color:var(--faint);margin-top:6px}
+  .section{padding:15px 22px;border-bottom:1px solid var(--border)}
+  .label{font-size:10.5px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:11px}
+  .modes{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+  .mode-btn{font-family:var(--ui);font-size:12.5px;font-weight:500;padding:9px 6px;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--muted);cursor:pointer;transition:all .15s}
+  .mode-btn:hover{background:var(--surface-hi);color:var(--text)}
+  .mode-btn.active{background:rgba(96,165,250,.14);border-color:var(--select);color:var(--select)}
+  .row{display:flex;align-items:center;gap:10px}
+  select{flex:1;font-family:var(--ui);font-size:13px;padding:9px 10px;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--text)}
+  input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;background:var(--surface-hi)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--signal);cursor:pointer;border:2px solid var(--bg)}
+  .readout{font-family:var(--mono);font-size:13px;color:var(--signal);min-width:62px;text-align:right}
+  .toggle-row{display:flex;gap:18px;margin-top:10px}
+  .toggle{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);cursor:pointer;user-select:none}
+  .track{width:34px;height:19px;border-radius:10px;background:var(--surface-hi);position:relative;transition:.2s;flex-shrink:0}
+  .track::after{content:'';position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:var(--faint);transition:.2s}
+  .toggle input{display:none}
+  .toggle input:checked+.track{background:rgba(45,212,191,.3)}
+  .toggle input:checked+.track::after{transform:translateX(15px);background:var(--signal)}
+  #wp-list{display:flex;flex-direction:column;gap:6px;max-height:130px;overflow-y:auto}
+  .wp{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:11.5px;background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--muted)}
+  .wp .idx{width:20px;height:20px;border-radius:50%;background:var(--select);color:var(--bg);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+  .wp .coord{flex:1;color:var(--text)}
+  .empty-hint{font-size:12px;color:var(--faint);line-height:1.6;font-style:italic}
+  .transport{display:grid;grid-template-columns:2fr 1fr 1fr;gap:8px}
+  .btn{font-family:var(--ui);font-size:13px;font-weight:600;padding:12px 8px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);cursor:pointer;transition:.15s}
+  .btn:hover:not(:disabled){background:var(--surface-hi)}
+  .btn:disabled{opacity:.4;cursor:not-allowed}
+  .btn.go{background:rgba(74,222,128,.15);border-color:var(--go);color:var(--go)}
+  .btn.warn{color:var(--warn)}.btn.stop{color:var(--stop)}
+  .btn.wide{width:100%}
+  .btn.connected{background:rgba(45,212,191,.15);border-color:var(--signal);color:var(--signal)}
+  #dpad{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;max-width:168px;margin:0 auto}
+  .dbtn{aspect-ratio:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;user-select:none}
+  .dbtn.held{background:rgba(45,212,191,.22);border-color:var(--signal);color:var(--signal)}
+  .dbtn.blank{background:transparent;border:none;cursor:default}
+  .telemetry{display:flex;flex-direction:column;gap:10px}
+  .tele-row{display:flex;justify-content:space-between;align-items:baseline}
+  .tele-row .k{font-size:11px;color:var(--muted)}
+  .tele-row .v{font-family:var(--mono);font-size:12.5px;color:var(--text)}
+  .progress-track{height:5px;border-radius:3px;background:var(--surface-hi);overflow:hidden;margin-top:2px}
+  .progress-fill{height:100%;width:0;background:var(--signal);transition:width .2s linear}
+  #map{flex:1;background:#0c0f14;position:relative}
+  .leaflet-container{background:#0c0f14;font-family:var(--ui)}
+  .pos-marker{width:16px;height:16px;border-radius:50%;background:var(--signal);border:2px solid #0c0f14;animation:ping 1.6s ease-out infinite}
+  @keyframes ping{0%{box-shadow:0 0 0 0 rgba(45,212,191,.55)}70%{box-shadow:0 0 0 16px rgba(45,212,191,0)}100%{box-shadow:0 0 0 0 rgba(45,212,191,0)}}
+  .wp-marker{width:22px;height:22px;border-radius:50% 50% 50% 0;background:var(--select);transform:rotate(-45deg);border:2px solid #0c0f14;display:flex;align-items:center;justify-content:center}
+  .wp-marker span{transform:rotate(45deg);color:#0c0f14;font-weight:700;font-size:11px;font-family:var(--mono)}
+  .map-hint{position:absolute;top:14px;left:50%;transform:translateX(-50%);z-index:500;background:rgba(18,23,31,.92);border:1px solid var(--border);padding:8px 16px;border-radius:20px;font-size:12px;color:var(--muted);pointer-events:none;transition:opacity .3s;opacity:0}
+
+  #spots-panel{width:340px;flex-shrink:0;background:var(--panel);border-left:1px solid var(--border);display:flex;flex-direction:column;overflow-y:auto}
+  #spots-resizer{width:6px;flex-shrink:0;cursor:col-resize;background:transparent;transition:background .15s}
+  #spots-resizer:hover,#spots-resizer.dragging{background:var(--signal);opacity:.55}
+  .spots-title-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  #btn-spots-collapse,#spots-expand{background:var(--surface);border:1px solid var(--border);color:var(--muted);cursor:pointer;border-radius:7px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:17px;line-height:1;flex-shrink:0}
+  #btn-spots-collapse:hover,#spots-expand:hover{background:var(--surface-hi);color:var(--text)}
+  #spots-expand{position:fixed;top:14px;right:14px;z-index:700;display:none;box-shadow:0 2px 8px rgba(0,0,0,.4)}
+  body.spots-collapsed #spots-panel,body.spots-collapsed #spots-resizer{display:none}
+  body.spots-collapsed #spots-expand{display:flex}
+  #spots-panel::-webkit-scrollbar{width:8px}#spots-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
+  .sf-types{display:flex;gap:6px}
+  .chip{flex:1;font-family:var(--ui);font-size:12.5px;padding:8px 6px;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--muted);cursor:pointer;transition:all .15s}
+  .chip:hover{background:var(--surface-hi);color:var(--text)}
+  .chip.active{background:rgba(45,212,191,.14);border-color:var(--signal);color:var(--signal)}
+  #spot-list{display:flex;flex-direction:column;gap:7px;max-height:340px;overflow-y:auto}
+  #spot-list::-webkit-scrollbar{width:6px}#spot-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+  .spot{display:flex;align-items:center;gap:11px;padding:9px 11px;background:var(--surface);border:1px solid var(--border);border-radius:8px}
+  .spot .sicon{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+  .spot .sbody{flex:1;min-width:0}
+  .spot .sname{font-size:13.5px;font-weight:500;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .spot .smeta{font-size:11.5px;color:var(--muted)}
+  .spot .scoord{font-size:11px;color:var(--faint);font-family:var(--mono)}
+  .spot .sact{display:flex;gap:2px}
+  .spot .sact button{background:none;border:none;color:var(--faint);cursor:pointer;font-size:13px;padding:5px;border-radius:5px;transition:all .12s}
+  .spot .sact button:hover{background:var(--surface-hi);color:var(--text)}
+  .empty-hint{font-size:12px;color:var(--faint);line-height:1.6;font-style:italic}
+  .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .form-grid, .form-grid *{min-width:0}
+  .form-grid input,.form-grid select{width:100%}
+  .form-grid input[type=text],.form-grid input:not([type]){font-family:var(--ui);font-size:13px;padding:9px 10px;background:var(--surface);border:1px solid var(--border);border-radius:7px;color:var(--text)}
+  .spi{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--signal);vertical-align:middle}
+</style>
+</head>
+<body>
+<aside id="panel">
+  <div class="head">
+    <h1><span class="dot" id="status-dot"></span> 定位模擬器</h1>
+    <div class="sub" id="status-text">待命中 · 點擊地圖新增航點</div>
+  </div>
+
+  <div class="section">
+    <div class="label">裝置</div>
+    <div class="row">
+      <select id="platform">
+        <option value="ios">iOS</option>
+        <option value="android">Android</option>
+      </select>
+      <span class="dot" id="device-dot"></span>
+    </div>
+    <button class="btn wide" id="btn-device" style="margin-top:10px">連接裝置</button>
+  </div>
+
+  <div class="section">
+    <div class="label">移動模式</div>
+    <div class="modes" id="modes">
+      <button class="mode-btn active" data-mode="teleport">單點傳送</button>
+      <button class="mode-btn" data-mode="two-point">兩點移動</button>
+      <button class="mode-btn" data-mode="multi-point">多點路線</button>
+      <button class="mode-btn" data-mode="joystick">搖桿模式</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">移動速度</div>
+    <div class="row">
+      <input type="range" id="speed" min="1" max="500" value="60" aria-label="速度">
+      <span class="readout" id="speed-val">60 km/h</span>
+    </div>
+    <div class="toggle-row">
+      <label class="toggle"><input type="checkbox" id="loop"><span class="track"></span>循環</label>
+      <label class="toggle"><input type="checkbox" id="jitter" checked><span class="track"></span>GPS 抖動</label>
+    </div>
+  </div>
+
+  <div class="section" id="dpad-section" style="display:none">
+    <div class="label">方向控制（或方向鍵）</div>
+    <div id="dpad">
+      <div class="dbtn blank"></div><div class="dbtn" data-dir="0">↑</div><div class="dbtn blank"></div>
+      <div class="dbtn" data-dir="270">←</div><div class="dbtn blank"></div><div class="dbtn" data-dir="90">→</div>
+      <div class="dbtn blank"></div><div class="dbtn" data-dir="180">↓</div><div class="dbtn blank"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">航點 <span id="wp-count" style="color:var(--faint)"></span></div>
+    <div id="wp-list"></div>
+  </div>
+
+  <div class="section">
+    <div class="transport">
+      <button class="btn go" id="btn-start">開始</button>
+      <button class="btn warn" id="btn-pause" disabled aria-label="暫停">‖</button>
+      <button class="btn stop" id="btn-clear" aria-label="清除">■</button>
+    </div>
+  </div>
+
+  <div class="section telemetry">
+    <div class="label">遙測</div>
+    <div class="tele-row"><span class="k">狀態</span><span class="v" id="t-state">idle</span></div>
+    <div class="tele-row"><span class="k">目前座標</span><span class="v" id="t-pos">—</span></div>
+    <div class="tele-row"><span class="k">已移動</span><span class="v" id="t-dist">0 m</span></div>
+    <div>
+      <div class="tele-row"><span class="k">進度</span><span class="v" id="t-prog">0%</span></div>
+      <div class="progress-track"><div class="progress-fill" id="t-bar"></div></div>
+    </div>
+  </div>
+</aside>
+
+<div id="map"><div class="map-hint" id="map-hint"></div></div>
+
+<div id="spots-resizer" title="拖曳調整寬度"></div>
+
+<aside id="spots-panel">
+  <div class="head">
+    <div class="spots-title-row">
+      <h1><i class="spi" data-i="pin"></i> 地點庫</h1>
+      <button id="btn-spots-collapse" title="收摺面板" aria-label="收摺面板">›</button>
+    </div>
+    <button class="btn wide" id="btn-spot-add" style="margin-top:10px">＋ 新增地點</button>
+    <button class="btn wide" id="btn-spot-import" style="margin-top:8px;font-size:13px">⭳ 匯入 CSV</button>
+  </div>
+
+  <div class="section">
+    <div class="label">篩選</div>
+    <div class="sf-types" id="sf-types">
+      <button class="chip active" data-type="flower">花</button>
+      <button class="chip active" data-type="mushroom">菇</button>
+      <button class="chip active" data-type="hidden">隱藏</button>
+    </div>
+    <div class="row" style="margin-top:12px">
+      <span style="font-size:12px;color:var(--muted)">分數 ≥</span>
+      <input type="range" id="sf-score" min="0" max="10" step="0.5" value="0" aria-label="最低分數">
+      <span class="readout" id="sf-score-val">0</span>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="label">排序</div>
+    <div class="row">
+      <select id="sf-sort">
+        <option value="score">分數</option>
+        <option value="lng">經度</option>
+        <option value="tz">時區</option>
+      </select>
+      <button class="btn" id="sf-dir" aria-label="正逆序" style="padding:9px 12px">↓</button>
+    </div>
+  </div>
+
+  <div class="section" style="flex:1">
+    <div class="label">地點 <span id="spot-count" style="color:var(--faint)"></span></div>
+    <div id="spot-list"></div>
+  </div>
+
+  <div class="section" id="spot-form" style="display:none">
+    <div class="label" id="spot-form-title">新增地點</div>
+    <div class="form-grid">
+      <input id="spot-name" placeholder="名稱" style="grid-column:1 / -1">
+      <input id="spot-lat" placeholder="緯度 lat" inputmode="decimal">
+      <input id="spot-lng" placeholder="經度 lng" inputmode="decimal">
+      <button class="btn" id="btn-spot-pick" style="grid-column:1 / -1;font-size:12px">⊕ 從地圖點選座標</button>
+      <div class="row" style="grid-column:1 / -1">
+        <span style="font-size:12px;color:var(--muted)">分數</span>
+        <input type="range" id="spot-score" min="0" max="10" step="0.5" value="8">
+        <span class="readout" id="spot-score-val">8</span>
+      </div>
+      <select id="spot-type" style="grid-column:1 / -1">
+        <option value="flower">花</option>
+        <option value="mushroom">菇</option>
+        <option value="hidden">隱藏</option>
+      </select>
+      <button class="btn go" id="btn-spot-save">儲存</button>
+      <button class="btn" id="btn-spot-cancel">取消</button>
+    </div>
+  </div>
+</aside>
+
+<button id="spots-expand" title="展開地點庫" aria-label="展開地點庫">‹</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="./renderer.js"></script>
+</body>
+</html>

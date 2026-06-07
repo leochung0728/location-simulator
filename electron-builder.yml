@@ -1,0 +1,56 @@
+appId: com.example.locationsimulator
+productName: Location Simulator
+copyright: Copyright © 2026
+
+directories:
+  output: release          # 安裝檔輸出（與 tsc 的 dist/ 分開）
+  buildResources: build    # 圖示、entitlements 等
+
+# 打包進 app 的檔案（已編譯的 JS + package.json）
+files:
+  - dist/**/*
+  - package.json
+
+# 放在 asar 之外的資源 —— 子程序腳本必須是磁碟上的實體檔，不能在 asar 內。
+# 對應 main.ts 的 process.resourcesPath/python/ios-location-helper.py
+extraResources:
+  - from: python
+    to: python
+    filter: ["**/*"]
+  - from: android-companion
+    to: android-companion
+    filter: ["**/*"]
+
+asar: true
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+  hardenedRuntime: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  gatekeeperAssess: false
+
+win:
+  target:
+    - nsis
+    - portable
+  # 凍結的 helper exe（若有 build）會打包到 resources/helper/
+  extraResources:
+    - from: helper-bin
+      to: helper
+      filter: ["**/*"]
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Development
+  maintainer: Your Name <you@example.com>

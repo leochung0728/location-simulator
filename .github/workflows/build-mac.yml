@@ -1,0 +1,46 @@
+name: Build macOS
+
+# 觸發方式：
+#   1) 在 GitHub 網頁 Actions 分頁手動按 "Run workflow"
+#   2) 推一個 v 開頭的 tag（例如 git tag v0.1.0 && git push --tags）
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      # 保險：若專案的 allow-scripts 機制擋掉了 electron 的安裝腳本，
+      # 直接執行 electron 的安裝程式，確保 Electron 執行檔有下載下來。
+      - name: Ensure Electron binary
+        run: node node_modules/electron/install.js
+
+      # 不做簽章：關掉自動尋找簽章身分，產出未簽章的 build（自用/測試用）。
+      # 要正式簽章+公證時，改用 CSC_LINK / CSC_KEY_PASSWORD 等 secrets。
+      - name: Build macOS app (unsigned)
+        run: npm run dist:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-installer
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error

@@ -1,0 +1,6 @@
+node_modules/
+dist/
+release/
+helper-build/
+*.log
+.DS_Store

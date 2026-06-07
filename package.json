@@ -1,0 +1,28 @@
+{
+  "name": "location-simulator",
+  "version": "0.1.0",
+  "description": "GPS 定位模擬器（定位功能測試用）。Electron 應用骨架。",
+  "main": "dist/main/main.js",
+  "author": "Your Name <you@example.com>",
+  "license": "MIT",
+  "dependencies": {
+    "countries-and-timezones": "^3.6.0",
+    "tz-lookup": "^6.1.25"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc && node -e \"require('fs').copyFileSync('src/renderer/index.html','dist/renderer/index.html')\"",
+    "start": "npm run build && electron .",
+    "pack": "npm run build && electron-builder --dir",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.42",
+    "electron": "^33.4.11",
+    "electron-builder": "^26.8.1",
+    "typescript": "^5.9.3"
+  }
+}
