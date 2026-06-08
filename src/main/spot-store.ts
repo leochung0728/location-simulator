@@ -89,6 +89,35 @@ export class SpotStore {
     return this.spots.slice();
   }
 
+  /** 以匯入的清單整批取代（備份還原用），做基本欄位清洗。 */
+  replaceAll(items: unknown): number {
+    const arr = Array.isArray(items) ? items : [];
+    const now = Date.now();
+    this.spots = arr
+      .map((raw) => {
+        const s = raw as Partial<Spot>;
+        const lat = Number(s.lat);
+        const lng = Number(s.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        return {
+          id: typeof s.id === 'string' && s.id ? s.id : randomUUID(),
+          name: String(s.name ?? '未命名'),
+          lat,
+          lng,
+          score: clampScore(Number(s.score ?? 0)),
+          type: normalizeType(String(s.type ?? 'mushroom')),
+          country: s.country,
+          timezone: s.timezone,
+          utcOffsetMinutes: s.utcOffsetMinutes,
+          createdAt: Number(s.createdAt) || now,
+          updatedAt: Number(s.updatedAt) || now,
+        } as Spot;
+      })
+      .filter((s): s is Spot => s !== null);
+    this.persist();
+    return this.spots.length;
+  }
+
   create(input: SpotInput): Spot {
     const now = Date.now();
     const lat = Number(input.lat);

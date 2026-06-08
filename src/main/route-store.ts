@@ -46,6 +46,30 @@ export class RouteStore {
     return this.routes.slice();
   }
 
+  /** 以匯入的清單整批取代（備份還原用），做基本欄位清洗。 */
+  replaceAll(items: unknown): number {
+    const arr = Array.isArray(items) ? items : [];
+    const now = Date.now();
+    this.routes = arr
+      .map((raw) => {
+        const r = raw as Partial<SavedRoute>;
+        const points = cleanPoints(r.points);
+        if (points.length === 0) return null;
+        return {
+          id: typeof r.id === 'string' && r.id ? r.id : randomUUID(),
+          name: String(r.name ?? '未命名路線'),
+          points,
+          loop: !!r.loop,
+          speedKmh: r.speedKmh !== undefined ? Number(r.speedKmh) : undefined,
+          createdAt: Number(r.createdAt) || now,
+          updatedAt: Number(r.updatedAt) || now,
+        } as SavedRoute;
+      })
+      .filter((r): r is SavedRoute => r !== null);
+    this.persist();
+    return this.routes.length;
+  }
+
   create(input: RouteInput): SavedRoute {
     const now = Date.now();
     const route: SavedRoute = {

@@ -28,6 +28,10 @@ const api = {
   setHeading: (deg: number, moving: boolean) =>
     ipcRenderer.invoke('sim:setHeading', deg, moving),
 
+  // 通道
+  tunnelStatus: (): Promise<boolean> => ipcRenderer.invoke('tunnel:status'),
+  tunnelRestart: (): Promise<boolean> => ipcRenderer.invoke('tunnel:restart'),
+
   // 事件訂閱（main → renderer）
   onPosition: (cb: (p: unknown) => void) => subscribe('sim:position', cb),
   onState: (cb: (s: string) => void) => subscribe('sim:state', cb),
@@ -56,6 +60,14 @@ const routesApi = {
 
 contextBridge.exposeInMainWorld('routes', routesApi);
 
+const backupApi = {
+  export: () => ipcRenderer.invoke('backup:export'),
+  import: () => ipcRenderer.invoke('backup:import'),
+};
+
+contextBridge.exposeInMainWorld('backup', backupApi);
+
 export type SimulatorBridge = typeof api;
 export type SpotsBridge = typeof spotsApi;
 export type RoutesBridge = typeof routesApi;
+export type BackupBridge = typeof backupApi;

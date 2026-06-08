@@ -19,6 +19,51 @@ let trailLine: any = null;
 let posMarker: any = null;
 let deviceConnected = false;
 
+// ── 設定（存 localStorage）──
+interface AppSettings {
+  defaultSpeed: number;          // km/h
+  jitterM: number;               // 抖動半徑（公尺）
+  units: 'metric' | 'imperial';
+  rememberLast: boolean;
+  follow: boolean;
+}
+const DEFAULT_SETTINGS: AppSettings = {
+  defaultSpeed: 60, jitterM: 3, units: 'metric', rememberLast: true, follow: true,
+};
+function loadSettings(): AppSettings {
+  try {
+    const raw = JSON.parse(localStorage.getItem('appSettings') || '{}');
+    return { ...DEFAULT_SETTINGS, ...raw };
+  } catch { return { ...DEFAULT_SETTINGS }; }
+}
+function saveSettings(): void {
+  try { localStorage.setItem('appSettings', JSON.stringify(settings)); } catch { /* ignore */ }
+}
+let settings: AppSettings = loadSettings();
+
+const MS_PER_KMH = 1000 / 3600;
+function fmtSpeed(kmh: number): string {
+  return settings.units === 'imperial'
+    ? `${(kmh * 0.621371).toFixed(0)} mph`
+    : `${kmh.toFixed(0)} km/h`;
+}
+function fmtDist(m: number): string {
+  if (settings.units === 'imperial') {
+    const mi = m / 1609.344;
+    return mi < 0.1 ? `${(m * 3.28084).toFixed(0)} ft` : `${mi.toFixed(2)} mi`;
+  }
+  return m < 1000 ? `${m.toFixed(0)} m` : `${(m / 1000).toFixed(2)} km`;
+}
+function fmtKm(km: number): string {
+  return settings.units === 'imperial' ? `${(km * 0.621371).toFixed(2)} mi` : `${km.toFixed(km < 10 ? 2 : 1)} km`;
+}
+function fmtDuration(sec: number): string {
+  if (!isFinite(sec) || sec <= 0) return '—';
+  const s = Math.round(sec);
+  const h = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = s % 60;
+  return h > 0 ? `${h} 小時 ${mm} 分` : mm > 0 ? `${mm} 分 ${ss} 秒` : `${ss} 秒`;
+}
+
 // ── 地圖 ──
 const map = L.map('map', { zoomControl: true, attributionControl: false })
   .setView([25.033, 121.5354], 15);
@@ -49,7 +94,15 @@ function addWaypoint(pt: LatLng): void {
 
 function redrawWaypoints(): void {
   wpMarkers.forEach((m) => map.removeLayer(m));
-  wpMarkers = waypoints.map((p, i) => L.marker([p.lat, p.lng], { icon: wpIcon(i) }).addTo(map));
+  wpMarkers = waypoints.map((p, i) => {
+    const mk = L.marker([p.lat, p.lng], { icon: wpIcon(i), draggable: true }).addTo(map);
+    mk.on('dragend', () => {
+      const ll = mk.getLatLng();
+      waypoints[i] = { lat: +ll.lat.toFixed(6), lng: +ll.lng.toFixed(6) };
+      redrawWaypoints();
+    });
+    return mk;
+  });
   if (routeLine) { map.removeLayer(routeLine); routeLine = null; }
   if (waypoints.length > 1 && mode !== 'teleport' && mode !== 'joystick') {
     const lls = waypoints.map((p) => [p.lat, p.lng]);
@@ -82,7 +135,9 @@ $('modes').addEventListener('click', (e) => {
 });
 
 $('speed').addEventListener('input', (e) =>
-  $('speed-val').textContent = `${(e.target as HTMLInputElement).value} km/h`);
+  $('speed-val').textContent = fmtSpeed(+(e.target as HTMLInputElement).value));
+$('vary').addEventListener('input', (e) =>
+  $('vary-val').textContent = `${(e.target as HTMLInputElement).value}%`);
 $('loop').addEventListener('change', redrawWaypoints);
 
 // ── 裝置連線 ──
@@ -105,12 +160,17 @@ $('btn-start').addEventListener('click', async () => {
   if ((mode === 'two-point' || mode === 'multi-point') && waypoints.length < 2)
     return flash('此模式至少需要兩個航點');
   if (trailLine) { map.removeLayer(trailLine); trailLine = null; }
+  const pts = waypoints.map((p) => ({ ...p }));
+  if (($('reverse') as HTMLInputElement).checked) pts.reverse();
   await sim.start({
     mode,
-    points: waypoints.map((p) => ({ ...p })),
+    points: pts,
     speedKmh: +($('speed') as HTMLInputElement).value,
     loop: ($('loop') as HTMLInputElement).checked,
-    jitterM: ($('jitter') as HTMLInputElement).checked ? 3 : 0,
+    jitterM: ($('jitter') as HTMLInputElement).checked ? settings.jitterM : 0,
+    repeat: Math.max(1, +($('repeat') as HTMLInputElement).value || 1),
+    dwellSec: Math.max(0, +($('dwell') as HTMLInputElement).value || 0),
+    speedVarPct: Math.max(0, Math.min(80, +($('vary') as HTMLInputElement).value || 0)) / 100,
   });
 });
 $('btn-pause').addEventListener('click', () => sim.pause());
@@ -133,12 +193,26 @@ document.querySelectorAll('.dbtn[data-dir]').forEach((b) => {
   b.addEventListener('mouseup', up);
   b.addEventListener('mouseleave', up);
 });
+function isTyping(): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || el.isContentEditable;
+}
 document.addEventListener('keydown', (e) => {
+  if (isTyping()) return;
+  // 空白鍵：開始 / 暫停
+  if (e.code === 'Space' || e.key === ' ') {
+    e.preventDefault();
+    if (currentState === 'running') sim.pause();
+    else (($('btn-start') as HTMLButtonElement)).click();
+    return;
+  }
   if (!(e.key in keyMap) || currentState !== 'running') return;
   e.preventDefault(); sim.setHeading(keyMap[e.key], true);
 });
 document.addEventListener('keyup', (e) => {
-  if (!(e.key in keyMap)) return;
+  if (isTyping() || !(e.key in keyMap)) return;
   sim.setHeading(keyMap[e.key], false);
 });
 
@@ -151,14 +225,20 @@ sim.onPosition(({ pos, session }) => {
   else posMarker.setLatLng(ll);
   if (!trailLine) trailLine = L.polyline([ll], { color: '#2dd4bf', weight: 3, opacity: .9 }).addTo(map);
   else trailLine.addLatLng(ll);
-  map.panTo(ll, { animate: true, duration: 0.2 });
+  if (settings.follow) map.panTo(ll, { animate: true, duration: 0.2 });
 
   $('t-pos').textContent = `${pos.lat.toFixed(5)}, ${pos.lng.toFixed(5)}`;
   const m = session.coveredM ?? 0;
-  $('t-dist').textContent = m < 1000 ? `${m.toFixed(0)} m` : `${(m / 1000).toFixed(2)} km`;
+  $('t-dist').textContent = fmtDist(m);
   const pct = Math.round((session.progress ?? 0) * 100);
   $('t-prog').textContent = `${pct}%`;
   ($('t-bar') as HTMLElement).style.width = `${pct}%`;
+
+  // 預估剩餘時間（以目前設定速度估算，未計入停留）
+  const total = session.totalM ?? 0;
+  const speedMs = (+($('speed') as HTMLInputElement).value) * MS_PER_KMH;
+  const remainM = Math.max(0, total - m);
+  $('t-eta').textContent = total > 0 && speedMs > 0 ? fmtDuration(remainM / speedMs) : '—';
 });
 
 sim.onState((state) => {
@@ -176,7 +256,7 @@ sim.onDeviceStatus((s) => {
   if (s.error) flash(`裝置錯誤：${s.error}`);
   updateDeviceUI(!!s.connected, s.platform);
 });
-sim.onDeviceLog((m) => console.log('[device]', m));
+sim.onDeviceLog((m) => { console.log('[device]', m); appendLog(m); });
 
 function updateDeviceUI(connected: boolean, platform?: string): void {
   deviceConnected = connected;
@@ -192,7 +272,8 @@ function flash(msg: string): void {
   setTimeout(() => { h.style.opacity = '0'; }, 2200);
 }
 function resetTelemetry(): void {
-  $('t-pos').textContent = '—'; $('t-dist').textContent = '0 m';
+  $('t-pos').textContent = '—'; $('t-dist').textContent = fmtDist(0);
+  $('t-eta').textContent = '—';
   $('t-prog').textContent = '0%'; ($('t-bar') as HTMLElement).style.width = '0';
 }
 
@@ -318,6 +399,7 @@ function loadSpotToMap(s: Spot): void {
 }
 
 async function deleteSpot(s: Spot): Promise<void> {
+  if (!confirm(`確定刪除地點「${s.name}」？此動作無法復原。`)) return;
   await spotsApi.remove(s.id);
   await loadSpots();
 }
@@ -508,9 +590,16 @@ function clearRouteEditPreview(): void {
 function drawRouteEditPreview(): void {
   clearRouteEditPreview();
   const pts = routePts.filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-  routeEditMarkers = pts.map((p, i) =>
-    L.marker([p.lat, p.lng], { icon: routeEditIcon(i) }).addTo(map),
-  );
+  routeEditMarkers = pts.map((p, i) => {
+    const idx = routePts.indexOf(p);
+    const mk = L.marker([p.lat, p.lng], { icon: routeEditIcon(i), draggable: true }).addTo(map);
+    mk.on('dragend', () => {
+      const ll = mk.getLatLng();
+      if (idx >= 0) { routePts[idx] = { lat: +ll.lat.toFixed(6), lng: +ll.lng.toFixed(6) }; }
+      renderRoutePoints();
+    });
+    return mk;
+  });
   if (pts.length > 1) {
     const lls = pts.map((p) => [p.lat, p.lng]);
     if (($('route-loop') as HTMLInputElement).checked) lls.push([pts[0].lat, pts[0].lng]);
@@ -558,7 +647,7 @@ function renderRoutes(): void {
   list.innerHTML = allRoutes
     .map((r) => {
       const km = routeDistanceKm(r.points, r.loop);
-      const meta = `${r.points.length} 點 · 約 ${km.toFixed(km < 10 ? 2 : 1)} km${r.loop ? ' · ⟲循環' : ''}`;
+      const meta = `${r.points.length} 點 · 約 ${fmtKm(km)}${r.loop ? ' · ⟲循環' : ''}`;
       return `<div class="route">
         <div class="rbody">
           <div class="rname">${esc(r.name)}</div>
@@ -597,7 +686,7 @@ function loadRouteToMap(r: SavedRoute): void {
   ($('loop') as HTMLInputElement).checked = r.loop;
   if (r.speedKmh !== undefined) {
     ($('speed') as HTMLInputElement).value = String(r.speedKmh);
-    $('speed-val').textContent = `${r.speedKmh} km/h`;
+    $('speed-val').textContent = fmtSpeed(r.speedKmh);
   }
   redrawWaypoints();
   if (waypoints.length > 1) {
@@ -605,10 +694,11 @@ function loadRouteToMap(r: SavedRoute): void {
   } else if (waypoints.length === 1) {
     map.panTo([waypoints[0].lat, waypoints[0].lng]);
   }
-  flash(`已載入路線「${r.name}」（速度 ${($('speed') as HTMLInputElement).value} km/h，可再調整）`);
+  flash(`已載入路線「${r.name}」（速度 ${fmtSpeed(+($('speed') as HTMLInputElement).value)}，可再調整）`);
 }
 
 async function deleteRoute(r: SavedRoute): Promise<void> {
+  if (!confirm(`確定刪除路線「${r.name}」？此動作無法復原。`)) return;
   await routesApi.remove(r.id);
   await loadRoutes();
 }
@@ -746,3 +836,173 @@ $('btn-route-save').addEventListener('click', async () => {
 });
 
 loadRoutes();
+
+/* ════════════════════════════════════════════════════════
+   日誌面板
+   ════════════════════════════════════════════════════════ */
+const logLines: string[] = [];
+function appendLog(msg: string): void {
+  const ts = new Date().toLocaleTimeString();
+  logLines.push(`[${ts}] ${msg}`);
+  if (logLines.length > 500) logLines.shift();
+  const body = $('log-body');
+  const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 8;
+  body.innerHTML = logLines
+    .map((l) => {
+      const cut = l.indexOf(']') + 1;
+      return `<div><span class="lt">${esc(l.slice(0, cut))}</span>${esc(l.slice(cut))}</div>`;
+    })
+    .join('');
+  if (atBottom) body.scrollTop = body.scrollHeight;
+}
+$('btn-log').addEventListener('click', () => {
+  const p = $('log-panel');
+  p.style.display = p.style.display === 'none' ? 'flex' : 'none';
+});
+$('btn-log-close').addEventListener('click', () => ($('log-panel').style.display = 'none'));
+$('btn-log-clear').addEventListener('click', () => { logLines.length = 0; $('log-body').innerHTML = ''; });
+$('btn-log-copy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(logLines.join('\n')); flash('日誌已複製'); }
+  catch { flash('複製失敗'); }
+});
+
+/* ════════════════════════════════════════════════════════
+   通道狀態（iOS）＋ 重啟
+   ════════════════════════════════════════════════════════ */
+function setTunnelPill(state: 'up' | 'down' | 'checking'): void {
+  const pill = $('tunnel-pill');
+  pill.className = 'tunnel-pill ' + (state === 'checking' ? '' : state);
+  const txt = state === 'up' ? '通道：就緒' : state === 'down' ? '通道：未啟動' : '通道：檢查中…';
+  pill.innerHTML = `<span class="tdot"></span>${txt}`;
+}
+async function refreshTunnel(): Promise<void> {
+  if (($('platform') as HTMLSelectElement).value !== 'ios') return;
+  setTunnelPill('checking');
+  try { setTunnelPill((await sim.tunnelStatus()) ? 'up' : 'down'); }
+  catch { setTunnelPill('down'); }
+}
+function syncTunnelRowVisibility(): void {
+  const ios = ($('platform') as HTMLSelectElement).value === 'ios';
+  $('tunnel-row').style.display = ios ? 'flex' : 'none';
+  if (ios) refreshTunnel();
+}
+$('btn-tunnel-restart').addEventListener('click', async () => {
+  setTunnelPill('checking');
+  ($('btn-tunnel-restart') as HTMLButtonElement).disabled = true;
+  flash('重啟通道中…（可能需要授權）');
+  try { await sim.tunnelRestart(); } finally {
+    ($('btn-tunnel-restart') as HTMLButtonElement).disabled = false;
+    refreshTunnel();
+  }
+});
+$('platform').addEventListener('change', () => {
+  syncTunnelRowVisibility();
+  if (settings.rememberLast) {
+    try { localStorage.setItem('lastDevice', ($('platform') as HTMLSelectElement).value); } catch { /* ignore */ }
+  }
+});
+setInterval(() => { if ($('tunnel-row').style.display !== 'none') refreshTunnel(); }, 8000);
+
+/* ════════════════════════════════════════════════════════
+   設定彈窗
+   ════════════════════════════════════════════════════════ */
+function applySettings(): void {
+  ($('speed') as HTMLInputElement).value = String(settings.defaultSpeed);
+  $('speed-val').textContent = fmtSpeed(settings.defaultSpeed);
+  ($('follow') as HTMLInputElement).checked = settings.follow;
+  resetTelemetry();
+  renderRoutes();
+}
+$('follow').addEventListener('change', () => {
+  settings.follow = ($('follow') as HTMLInputElement).checked;
+  saveSettings();
+});
+$('btn-settings').addEventListener('click', () => {
+  ($('set-speed') as HTMLInputElement).value = String(settings.defaultSpeed);
+  ($('set-jitter') as HTMLInputElement).value = String(settings.jitterM);
+  ($('set-units') as HTMLSelectElement).value = settings.units;
+  ($('set-remember') as HTMLInputElement).checked = settings.rememberLast;
+  $('settings-overlay').style.display = 'flex';
+});
+function closeSettings(): void { $('settings-overlay').style.display = 'none'; }
+$('btn-settings-close').addEventListener('click', closeSettings);
+$('settings-overlay').addEventListener('click', (e) => {
+  if (e.target === $('settings-overlay')) closeSettings();
+});
+$('set-speed').addEventListener('change', () => {
+  settings.defaultSpeed = Math.max(1, Math.min(500, +($('set-speed') as HTMLInputElement).value || 60));
+  saveSettings();
+});
+$('set-jitter').addEventListener('change', () => {
+  settings.jitterM = Math.max(0, Math.min(50, +($('set-jitter') as HTMLInputElement).value || 0));
+  saveSettings();
+});
+$('set-units').addEventListener('change', () => {
+  settings.units = ($('set-units') as HTMLSelectElement).value === 'imperial' ? 'imperial' : 'metric';
+  saveSettings();
+  $('speed-val').textContent = fmtSpeed(+($('speed') as HTMLInputElement).value);
+  renderRoutes();
+  resetTelemetry();
+});
+$('set-remember').addEventListener('change', () => {
+  settings.rememberLast = ($('set-remember') as HTMLInputElement).checked;
+  saveSettings();
+});
+
+// 備份匯出 / 匯入
+$('btn-backup-export').addEventListener('click', async () => {
+  const r = await window.backup.export();
+  if (r.canceled) return;
+  flash(r.ok ? `已匯出（地點 ${r.spots}、路線 ${r.routes}）` : `匯出失敗：${r.error ?? ''}`);
+});
+$('btn-backup-import').addEventListener('click', async () => {
+  if (!confirm('匯入備份會覆蓋目前的地點與路線，確定繼續？')) return;
+  const r = await window.backup.import();
+  if (r.canceled) return;
+  if (r.ok) {
+    flash(`已匯入（地點 ${r.spots}、路線 ${r.routes}）`);
+    await loadSpots();
+    await loadRoutes();
+  } else {
+    flash(`匯入失敗：${r.error ?? ''}`);
+  }
+});
+
+/* ════════════════════════════════════════════════════════
+   記住上次的地圖視角 / 模式 / 裝置
+   ════════════════════════════════════════════════════════ */
+function applyMode(m: Mode): void {
+  mode = m;
+  document.querySelectorAll('.mode-btn').forEach((x) =>
+    x.classList.toggle('active', (x as HTMLElement).dataset.mode === m));
+  $('dpad-section').style.display = m === 'joystick' ? 'block' : 'none';
+  redrawWaypoints();
+}
+map.on('moveend', () => {
+  if (!settings.rememberLast) return;
+  const c = map.getCenter();
+  try { localStorage.setItem('lastView', JSON.stringify({ lat: c.lat, lng: c.lng, z: map.getZoom() })); } catch { /* ignore */ }
+});
+$('modes').addEventListener('click', () => {
+  if (settings.rememberLast) { try { localStorage.setItem('lastMode', mode); } catch { /* ignore */ } }
+});
+function restoreLast(): void {
+  if (!settings.rememberLast) return;
+  try {
+    const v = JSON.parse(localStorage.getItem('lastView') || 'null');
+    if (v && isFinite(v.lat) && isFinite(v.lng)) map.setView([v.lat, v.lng], v.z || map.getZoom());
+  } catch { /* ignore */ }
+  try {
+    const dev = localStorage.getItem('lastDevice');
+    if (dev === 'ios' || dev === 'android') ($('platform') as HTMLSelectElement).value = dev;
+  } catch { /* ignore */ }
+  try {
+    const lm = localStorage.getItem('lastMode') as Mode | null;
+    if (lm && lm !== 'teleport') applyMode(lm);
+  } catch { /* ignore */ }
+}
+
+// ── 初始化 ──
+applySettings();
+restoreLast();
+syncTunnelRowVisibility();

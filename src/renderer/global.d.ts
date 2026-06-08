@@ -8,10 +8,17 @@ interface SimulatorBridge {
   resume(): Promise<void>;
   stop(): Promise<void>;
   setHeading(deg: number, moving: boolean): Promise<void>;
+  tunnelStatus(): Promise<boolean>;
+  tunnelRestart(): Promise<boolean>;
   onPosition(cb: (p: { pos: { lat: number; lng: number }; session: any }) => void): () => void;
   onState(cb: (s: string) => void): () => void;
   onDeviceStatus(cb: (s: any) => void): () => void;
   onDeviceLog(cb: (m: string) => void): () => void;
+}
+
+interface BackupBridge {
+  export(): Promise<{ ok: boolean; canceled?: boolean; path?: string; spots?: number; routes?: number; error?: string }>;
+  import(): Promise<{ ok: boolean; canceled?: boolean; spots?: number; routes?: number; error?: string }>;
 }
 
 interface SpotsBridge {
@@ -80,6 +87,7 @@ declare global {
     simulator: SimulatorBridge;
     spots: SpotsBridge;
     routes: RoutesBridge;
+    backup: BackupBridge;
   }
 
   // Leaflet 由 CDN 以全域 L 載入

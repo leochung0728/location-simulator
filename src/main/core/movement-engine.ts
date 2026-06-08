@@ -28,8 +28,11 @@ export interface Route {
   mode: MoveMode;
   points: Coordinate[];   // 單點=1, 兩點=2, 多點=N
   speedKmh: number;       // 移動速度（公里/小時）
-  loop?: boolean;         // 是否循環（多點時會繞回起點）
+  loop?: boolean;         // 是否循環（多點時會繞回起點，無限）
   jitterM?: number;       // 座標隨機抖動半徑（公尺），模擬真實 GPS 訊號
+  repeat?: number;        // 非循環時的往返趟數（>=1，預設 1）
+  dwellSec?: number;      // 每抵達一個座標點停留的秒數（預設 0）
+  speedVarPct?: number;   // 速度隨機變化幅度 0~1（每段套用一次，預設 0）
 }
 
 export type SessionState = 'idle' | 'running' | 'paused' | 'finished';
@@ -141,11 +144,16 @@ export function* walkSegment(
   yield { ...to }; // 最後一步直接吸附到精確目標
 }
 
+const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
+
 /**
  * 依 Route 產生完整座標序列。
  *   - teleport：直接吐出最後一個點
  *   - two-point / multi-point：逐段串接
  *   - loop：跑完最後一段後繞回起點，無限循環
+ *   - repeat：非循環時，整條路線往返 N 趟（趟與趟之間會走回起點）
+ *   - dwellSec：每抵達一個點，原地停留數秒（吐出相同座標數個 tick）
+ *   - speedVarPct：每一段的速度在基準值上下隨機浮動
  * joystick 模式為即時控制，不走這裡（見 MovementEngine.setHeading）。
  */
 export function* walkRoute(
@@ -160,29 +168,41 @@ export function* walkRoute(
     return;
   }
 
-  const speedMs = (route.speedKmh * 1000) / 3600;
+  const baseSpeedMs = (route.speedKmh * 1000) / 3600;
   const jitter = route.jitterM ?? 0;
+  const varPct = clamp01(route.speedVarPct ?? 0);
+  const dwellTicks = Math.max(0, Math.round(((route.dwellSec ?? 0) * 1000) / tickMs));
+  const passes = route.loop ? Infinity : Math.max(1, Math.floor(route.repeat ?? 1));
+
+  // 每段套用一次的速度（含隨機浮動），最低不低於基準的 20%，避免歸零
+  const segSpeed = (): number =>
+    varPct > 0 ? baseSpeedMs * Math.max(0.2, 1 + (Math.random() * 2 - 1) * varPct) : baseSpeedMs;
 
   yield { ...pts[0] }; // 先回報起點
 
-  do {
+  for (let pass = 0; pass < passes; pass++) {
     for (let i = 0; i < pts.length - 1; i++) {
-      yield* walkSegment(pts[i], pts[i + 1], speedMs, tickMs, jitter);
+      yield* walkSegment(pts[i], pts[i + 1], segSpeed(), tickMs, jitter);
+      for (let d = 0; d < dwellTicks; d++) yield { ...pts[i + 1] };
     }
-    if (route.loop && pts.length > 1) {
-      // 繞回起點，形成封閉路線
-      yield* walkSegment(pts[pts.length - 1], pts[0], speedMs, tickMs, jitter);
+    const isLastPass = !route.loop && pass === passes - 1;
+    if (pts.length > 1 && !isLastPass) {
+      // 繞回起點：loop 為封閉路線，repeat 為下一趟的銜接
+      yield* walkSegment(pts[pts.length - 1], pts[0], segSpeed(), tickMs, jitter);
+      for (let d = 0; d < dwellTicks; d++) yield { ...pts[0] };
     }
-  } while (route.loop);
+  }
 }
 
-/** 計算一條路線的總長度（公尺）。loop 會把繞回起點的那段也算進去。 */
+/** 計算一條路線的總長度（公尺）。loop 回傳單圈；repeat 會把往返趟數算進去。 */
 export function routeLength(route: Route): number {
   const pts = route.points;
-  let total = 0;
-  for (let i = 0; i < pts.length - 1; i++) total += haversine(pts[i], pts[i + 1]);
-  if (route.loop && pts.length > 1) total += haversine(pts[pts.length - 1], pts[0]);
-  return total;
+  let forward = 0;
+  for (let i = 0; i < pts.length - 1; i++) forward += haversine(pts[i], pts[i + 1]);
+  const back = pts.length > 1 ? haversine(pts[pts.length - 1], pts[0]) : 0;
+  if (route.loop) return forward + back;
+  const passes = Math.max(1, Math.floor(route.repeat ?? 1));
+  return forward * passes + back * (passes - 1);
 }
 
 // ────────────────────────────────────────────────────────────

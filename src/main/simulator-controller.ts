@@ -101,6 +101,23 @@ export class SimulatorController {
     this.engine.setHeading(deg, moving);
   }
 
+  /** 查詢 tunnel 狀態（true=就緒）。 */
+  tunnelStatus(): Promise<boolean> {
+    return this.tunnel.status();
+  }
+
+  /** 重啟 tunnel，並把結果回報到日誌。 */
+  async tunnelRestart(): Promise<boolean> {
+    try {
+      await this.tunnel.restart();
+      this.send('device:log', 'tunnel 已就緒');
+      return true;
+    } catch (e) {
+      this.send('device:log', `tunnel 重啟失敗：${String(e)}`);
+      return false;
+    }
+  }
+
   private send(channel: string, payload: unknown): void {
     if (!this.win.isDestroyed()) this.win.webContents.send(channel, payload);
   }

@@ -56,6 +56,19 @@ export class TunnelManager {
     await this.waitReady();
   }
 
+  /** 查詢 tunnel 目前是否就緒（GET 探測）。 */
+  async status(): Promise<boolean> {
+    return this.isReady();
+  }
+
+  /** 強制重啟：關掉自己啟動的，再重新確保就緒。 */
+  async restart(): Promise<void> {
+    this.onLog?.('重啟 tunnel…');
+    this.stop();
+    this.launchError = null;
+    await this.ensureRunning();
+  }
+
   /** 結束自己啟動的 tunneld（重用既有的不會被關掉）。 */
   stop(): void {
     if (this.proc && this.startedByUs) {

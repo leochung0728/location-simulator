@@ -142,6 +142,51 @@ function registerIpc(): void {
     routeStore!.remove(id);
     return { ok: true };
   });
+
+  // 通道狀態 / 重啟
+  ipcMain.handle('tunnel:status', () => controller!.tunnelStatus());
+  ipcMain.handle('tunnel:restart', () => controller!.tunnelRestart());
+
+  // 庫備份 / 還原
+  ipcMain.handle('backup:export', async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const res = await dialog.showSaveDialog(win, {
+      title: '匯出備份',
+      defaultPath: `定位模擬器備份-${new Date().toISOString().slice(0, 10)}.json`,
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    });
+    if (res.canceled || !res.filePath) return { ok: false, canceled: true };
+    try {
+      const payload = {
+        app: 'location-simulator',
+        version: 1,
+        exportedAt: Date.now(),
+        spots: spotStore!.list(),
+        routes: routeStore!.list(),
+      };
+      fs.writeFileSync(res.filePath, JSON.stringify(payload, null, 2), 'utf-8');
+      return { ok: true, path: res.filePath, spots: payload.spots.length, routes: payload.routes.length };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
+  ipcMain.handle('backup:import', async () => {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0];
+    const res = await dialog.showOpenDialog(win, {
+      title: '還原備份',
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+      properties: ['openFile'],
+    });
+    if (res.canceled || !res.filePaths[0]) return { ok: false, canceled: true };
+    try {
+      const data = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf-8'));
+      const spots = spotStore!.replaceAll(data.spots);
+      const routes = routeStore!.replaceAll(data.routes);
+      return { ok: true, spots, routes };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
+  });
 }
 
 if (needsElevation()) {
