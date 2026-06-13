@@ -121,23 +121,28 @@ function withJitter(coord: Coordinate, jitterM: number): Coordinate {
 // Generator 路徑產生器
 // ────────────────────────────────────────────────────────────
 
+/** 速度來源：固定值（公尺/秒）或每步即時讀取的函式。 */
+export type SpeedSource = number | (() => number);
+const resolveSpeed = (s: SpeedSource): number => (typeof s === 'function' ? s() : s);
+
 /**
  * 走完單一段（from → to），每 tick 推進一步。
  * 不產生起點，最後一定剛好落在 to。
+ * speed 可傳函式 → 每步即時讀取，支援移動中即時調速。
  */
 export function* walkSegment(
   from: Coordinate,
   to: Coordinate,
-  speedMs: number,
+  speed: SpeedSource,
   tickMs: number,
   jitterM = 0,
 ): Generator<Coordinate, void, void> {
-  const stepDist = speedMs * (tickMs / 1000);
-  if (stepDist <= 0) throw new Error('speed 必須大於 0');
-
   let current: Coordinate = { ...from };
   // 距離大於一步時，沿著「當前 → 目標」的方位角持續推進
-  while (haversine(current, to) > stepDist) {
+  while (true) {
+    const stepDist = resolveSpeed(speed) * (tickMs / 1000);
+    if (stepDist <= 0) throw new Error('speed 必須大於 0');
+    if (haversine(current, to) <= stepDist) break;
     current = destination(current, stepDist, bearing(current, to));
     yield withJitter(current, jitterM);
   }
@@ -159,6 +164,7 @@ const clamp01 = (n: number): number => Math.min(1, Math.max(0, n));
 export function* walkRoute(
   route: Route,
   tickMs = 1000,
+  getSpeedMs?: () => number,
 ): Generator<Coordinate, void, void> {
   const pts = route.points;
   if (pts.length === 0) return;
@@ -169,14 +175,17 @@ export function* walkRoute(
   }
 
   const baseSpeedMs = (route.speedKmh * 1000) / 3600;
+  const liveBase = getSpeedMs ?? (() => baseSpeedMs);   // 未提供 → 行為與固定速度完全相同
   const jitter = route.jitterM ?? 0;
   const varPct = clamp01(route.speedVarPct ?? 0);
   const dwellTicks = Math.max(0, Math.round(((route.dwellSec ?? 0) * 1000) / tickMs));
   const passes = route.loop ? Infinity : Math.max(1, Math.floor(route.repeat ?? 1));
 
-  // 每段套用一次的速度（含隨機浮動），最低不低於基準的 20%，避免歸零
-  const segSpeed = (): number =>
-    varPct > 0 ? baseSpeedMs * Math.max(0.2, 1 + (Math.random() * 2 - 1) * varPct) : baseSpeedMs;
+  // 每段固定一個變化係數，但基準速度即時讀取（支援移動中調速）
+  const segSpeed = (): (() => number) => {
+    const f = varPct > 0 ? Math.max(0.2, 1 + (Math.random() * 2 - 1) * varPct) : 1;
+    return () => liveBase() * f;
+  };
 
   yield { ...pts[0] }; // 先回報起點
 
@@ -222,6 +231,7 @@ export class MovementEngine {
 
   // joystick 模式狀態
   private joystick = { active: false, heading: 0, moving: false, speedMs: 0, jitterM: 0 };
+  private liveSpeedMs = 0;   // 即時速度（多點/兩點走線時由 walkRoute 每步讀取）
 
   private session: Session = {
     state: 'idle',
@@ -264,7 +274,8 @@ export class MovementEngine {
       return;
     }
 
-    this.iterator = walkRoute(route, this.tickMs);
+    this.liveSpeedMs = (route.speedKmh * 1000) / 3600;
+    this.iterator = walkRoute(route, this.tickMs, () => this.liveSpeedMs);
     this.session = {
       state: 'running',
       currentPos: null,
@@ -337,6 +348,13 @@ export class MovementEngine {
   setHeading(headingDeg: number, moving = true): void {
     this.joystick.heading = ((headingDeg % 360) + 360) % 360;
     this.joystick.moving = moving;
+  }
+
+  /** 即時調整移動速度（km/h）。走線模式與搖桿模式皆即時生效。 */
+  setSpeed(speedKmh: number): void {
+    const ms = Math.max(0, (speedKmh * 1000) / 3600);
+    this.liveSpeedMs = ms;
+    if (this.joystick.active) this.joystick.speedMs = ms;
   }
 
   // ── 狀態控制 ──

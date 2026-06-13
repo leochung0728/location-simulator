@@ -13,6 +13,7 @@ import { SpotStore, type SpotInput } from './spot-store';
 import { RouteStore, type RouteInput } from './route-store';
 import type { Platform } from './core/device-adapter';
 import type { Route } from './core/movement-engine';
+import { ensureLicensed } from './license';
 
 let controller: SimulatorController | null = null;
 let spotStore: SpotStore | null = null;
@@ -95,13 +96,17 @@ function registerIpc(): void {
   ipcMain.handle('device:connect', (_e, platform: Platform, opts) =>
     controller!.connect(platform, opts),
   );
-  ipcMain.handle('device:disconnect', () => controller!.disconnect());
-  ipcMain.handle('sim:start', (_e, route: Route) => controller!.start(route));
-  ipcMain.handle('sim:pause', () => controller!.pause());
-  ipcMain.handle('sim:resume', () => controller!.resume());
-  ipcMain.handle('sim:stop', () => controller!.stop());
-  ipcMain.handle('sim:setHeading', (_e, deg: number, moving: boolean) =>
-    controller!.setHeading(deg, moving),
+  ipcMain.handle('device:disconnect', (_e, id: string) => controller!.disconnect(id));
+  ipcMain.handle('device:list', () => controller!.listDevices());
+  ipcMain.handle('sim:start', (_e, id: string, route: Route) => controller!.start(id, route));
+  ipcMain.handle('sim:pause', (_e, id: string) => controller!.pause(id));
+  ipcMain.handle('sim:resume', (_e, id: string) => controller!.resume(id));
+  ipcMain.handle('sim:stop', (_e, id: string) => controller!.stop(id));
+  ipcMain.handle('sim:setHeading', (_e, id: string, deg: number, moving: boolean) =>
+    controller!.setHeading(id, deg, moving),
+  );
+  ipcMain.handle('sim:setSpeed', (_e, id: string, speedKmh: number) =>
+    controller!.setSpeed(id, speedKmh),
   );
 
   // 地點庫
@@ -145,6 +150,7 @@ function registerIpc(): void {
 
   // 通道狀態 / 重啟
   ipcMain.handle('tunnel:status', () => controller!.tunnelStatus());
+  ipcMain.handle('tunnel:prewarm', () => controller!.prewarmTunnel());
   ipcMain.handle('tunnel:restart', () => controller!.tunnelRestart());
 
   // 庫備份 / 還原
@@ -194,7 +200,11 @@ if (needsElevation()) {
   relaunchElevated();
   app.quit();
 } else {
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
+    // 裝置授權閘門：未通過只顯示授權視窗，不啟動主程式
+    const licensed = await ensureLicensed();
+    if (!licensed) return;
+
     spotStore = new SpotStore();
     routeStore = new RouteStore();
     registerIpc();

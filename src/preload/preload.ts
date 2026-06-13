@@ -16,20 +16,23 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): Unsubscribe {
 
 const api = {
   // 裝置
-  connect: (platform: 'ios' | 'android', opts: { udid?: string } = {}) =>
+  connect: (platform: 'ios' | 'android', opts: { udid?: string; name?: string; connection?: string } = {}) =>
     ipcRenderer.invoke('device:connect', platform, opts),
-  disconnect: () => ipcRenderer.invoke('device:disconnect'),
+  disconnect: (id: string) => ipcRenderer.invoke('device:disconnect', id),
+  listDevices: () => ipcRenderer.invoke('device:list'),
 
-  // 模擬控制
-  start: (route: unknown) => ipcRenderer.invoke('sim:start', route),
-  pause: () => ipcRenderer.invoke('sim:pause'),
-  resume: () => ipcRenderer.invoke('sim:resume'),
-  stop: () => ipcRenderer.invoke('sim:stop'),
-  setHeading: (deg: number, moving: boolean) =>
-    ipcRenderer.invoke('sim:setHeading', deg, moving),
+  // 模擬控制（針對指定裝置 id）
+  start: (id: string, route: unknown) => ipcRenderer.invoke('sim:start', id, route),
+  pause: (id: string) => ipcRenderer.invoke('sim:pause', id),
+  resume: (id: string) => ipcRenderer.invoke('sim:resume', id),
+  stop: (id: string) => ipcRenderer.invoke('sim:stop', id),
+  setHeading: (id: string, deg: number, moving: boolean) =>
+    ipcRenderer.invoke('sim:setHeading', id, deg, moving),
+  setSpeed: (id: string, speedKmh: number) => ipcRenderer.invoke('sim:setSpeed', id, speedKmh),
 
   // 通道
   tunnelStatus: (): Promise<boolean> => ipcRenderer.invoke('tunnel:status'),
+  tunnelPrewarm: (): Promise<boolean> => ipcRenderer.invoke('tunnel:prewarm'),
   tunnelRestart: (): Promise<boolean> => ipcRenderer.invoke('tunnel:restart'),
 
   // 事件訂閱（main → renderer）

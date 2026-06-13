@@ -1,6 +1,45 @@
+# ── 相依套件 / 編譯與打包產物 ──
 node_modules/
+
+# tsc 編譯輸出
 dist/
+
+# electron-builder 安裝檔輸出
 release/
+
+# PyInstaller 凍結的 helper / tunneld（打包才需要，勿進 git）
+helper-bin/
+
+# PyInstaller 工作目錄（freeze 用 --workpath helper-build）
 helper-build/
-*.log
+
+# PyInstaller 產生的 spec 檔（在 repo 根）
+*.spec
+
+# ── 授權（機密，絕不可進版控）──
+# 簽發私鑰 private.pem
+tools/keys/
+# 已簽發的 .lic（含機器碼）
+licenses/
+
+# ── 程式碼簽章憑證（機密）──
+*.p12
+*.pfx
+*.cer
+*.mobileprovision
+*.provisionprofile
+
+# ── 環境變數 ──
+.env
+.env.*
+
+# ── Python 本機產物 ──
+__pycache__/
+*.pyc
+
+# ── OS / 編輯器 ──
 .DS_Store
+Thumbs.db
+*.log
+
+# 注意：不要忽略 build/（內含要版控的 entitlements、圖示等 buildResources）

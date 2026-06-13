@@ -1,17 +1,20 @@
 export {};
 
 interface SimulatorBridge {
-  connect(platform: 'ios' | 'android', opts?: { udid?: string }): Promise<void>;
-  disconnect(): Promise<void>;
-  start(route: unknown): Promise<void>;
-  pause(): Promise<void>;
-  resume(): Promise<void>;
-  stop(): Promise<void>;
-  setHeading(deg: number, moving: boolean): Promise<void>;
+  connect(platform: 'ios' | 'android', opts?: { udid?: string; name?: string; connection?: string }): Promise<void>;
+  disconnect(id: string): Promise<void>;
+  listDevices(): Promise<IosDevice[]>;
+  start(id: string, route: unknown): Promise<void>;
+  pause(id: string): Promise<void>;
+  resume(id: string): Promise<void>;
+  stop(id: string): Promise<void>;
+  setHeading(id: string, deg: number, moving: boolean): Promise<void>;
+  setSpeed(id: string, speedKmh: number): Promise<void>;
   tunnelStatus(): Promise<boolean>;
+  tunnelPrewarm(): Promise<boolean>;
   tunnelRestart(): Promise<boolean>;
-  onPosition(cb: (p: { pos: { lat: number; lng: number }; session: any }) => void): () => void;
-  onState(cb: (s: string) => void): () => void;
+  onPosition(cb: (p: { udid: string; pos: { lat: number; lng: number }; session: any }) => void): () => void;
+  onState(cb: (s: { udid: string; state: string }) => void): () => void;
   onDeviceStatus(cb: (s: any) => void): () => void;
   onDeviceLog(cb: (m: string) => void): () => void;
 }
@@ -38,6 +41,14 @@ interface RoutesBridge {
 
 declare global {
   type SpotType = 'flower' | 'mushroom' | 'hidden';
+
+  interface IosDevice {
+    udid: string;
+    name: string | null;
+    iosVersion: string | null;
+    connection: 'usb' | 'wifi';
+    tunnelReady: boolean;
+  }
 
   interface Spot {
     id: string;

@@ -23,6 +23,26 @@ extraResources:
 
 asar: true
 
+# ── 防竄改 / 強化（Electron Fuses）──
+# 在 Electron 二進位上翻轉保護位元。需要 Electron 16+（macOS）/ 30+（Windows）。
+# enableEmbeddedAsarIntegrityValidation + onlyLoadAppFromAsar：執行時以建置時雜湊
+# 驗證 app.asar，被竄改或雜湊不符即強制終止（簽章後最有效）。
+electronFuses:
+  runAsNode: false                              # 禁止把 app 當純 Node 跑（擋 dump）
+  enableNodeOptionsEnvironmentVariable: false   # 禁止用 NODE_OPTIONS 注入
+  enableNodeCliInspectArguments: false          # 禁止 --inspect 偵錯介面
+  enableEmbeddedAsarIntegrityValidation: true   # 啟用 asar 完整性驗證
+  onlyLoadAppFromAsar: true                     # 只從 app.asar 載入程式
+  enableCookieEncryption: true
+
+# ── 程式碼簽章 / 公證（用環境變數提供憑證；CI 設為 secrets）──
+# Windows（Authenticode）與 macOS 簽章：electron-builder 會自動讀取
+#   CSC_LINK            憑證檔（.p12/.pfx）的路徑或 base64
+#   CSC_KEY_PASSWORD    憑證密碼
+# macOS 公證（notarization）：把下方 mac.notarize 取消註解，並提供
+#   APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID
+# 未提供憑證時維持未簽章建置（fuses 仍會套用，但 asar 完整性在 macOS 需簽章才完整生效）。
+
 mac:
   category: public.app-category.developer-tools
   target:
@@ -34,6 +54,8 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   gatekeeperAssess: false
+  # 公證：提供 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID 後取消下行註解
+  # notarize: true
   # 凍結的 helper/tunneld 是單一架構 Mach-O，在通用版合併時照原樣保留（不做 lipo）。
   x64ArchFiles: "**/helper/*"
   # 凍結的 helper / tunneld（CI 在 mac runner 上以 PyInstaller 產生）會打包到 resources/helper/

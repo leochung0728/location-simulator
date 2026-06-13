@@ -63,12 +63,22 @@ jobs:
 
       # 直接呼叫 electron-builder 並明確 --publish never，
       # 避免它在 CI 偵測下自動嘗試發佈到 GitHub Releases（會要 token 而失敗）。
-      - name: Build macOS app (unsigned, no publish)
+      - name: Build macOS app (obfuscated, no publish)
         run: |
-          npm run build
+          npm run protect          # tsc → 複製 renderer 資源 → 混淆 dist/ 內 JS
           npx electron-builder --mac --publish never
         env:
+          # 未簽章建置（fuses 仍會套用）。要簽章+公證時：
+          #   1) 移除下面這行 CSC_IDENTITY_AUTO_DISCOVERY: false
+          #   2) 在 repo Secrets 設定 CSC_LINK / CSC_KEY_PASSWORD，並取消下方註解
+          #   3) 要公證再加 APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID，
+          #      並把 electron-builder.yml 的 mac.notarize: true 取消註解
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          # CSC_LINK: ${{ secrets.CSC_LINK }}
+          # CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Upload installer
         uses: actions/upload-artifact@v4

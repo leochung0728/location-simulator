@@ -6,23 +6,26 @@
   "author": "Your Name <you@example.com>",
   "license": "MIT",
   "dependencies": {
-    "countries-and-timezones": "^3.6.0",
+    "countries-and-timezones": "^3.9.0",
     "tz-lookup": "^6.1.25"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "tsc && node -e \"require('fs').copyFileSync('src/renderer/index.html','dist/renderer/index.html')\"",
+    "obfuscate": "node scripts/obfuscate.js",
+    "protect": "npm run build && npm run obfuscate",
     "start": "npm run build && electron .",
     "pack": "npm run build && electron-builder --dir",
-    "dist": "npm run build && electron-builder",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist": "npm run protect && electron-builder",
+    "dist:mac": "npm run protect && electron-builder --mac",
+    "dist:win": "npm run protect && electron-builder --win",
+    "dist:linux": "npm run protect && electron-builder --linux"
   },
   "devDependencies": {
     "@types/node": "^20.19.42",
     "electron": "^33.4.11",
     "electron-builder": "^26.8.1",
+    "javascript-obfuscator": "^4.2.2",
     "typescript": "^5.9.3"
   }
 }

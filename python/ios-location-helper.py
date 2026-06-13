@@ -82,6 +82,91 @@ async def read_line() -> str | None:
     return line if line else None
 
 
+async def _maybe_await(x):
+    """相容 pymobiledevice3 同步/非同步介面：是 awaitable 就 await。"""
+    import inspect
+    if inspect.isawaitable(x):
+        return await x
+    return x
+
+
+async def list_devices_action() -> int:
+    """
+    列出目前可見的 iOS 裝置（USB 與 WiFi 合併），盡力補上名稱與 iOS 版本，
+    並標記哪些已透過 tunneld 建立通道（iOS 17+ 可直接連）。
+    輸出一行： {"event":"devices","devices":[{udid,name,iosVersion,connection,tunnelReady}]}
+    """
+    seen: dict[str, dict] = {}
+
+    # iOS 17+：tunneld 已建通道的裝置
+    tunnel_udids: set[str] = set()
+    try:
+        from pymobiledevice3.tunneld.api import get_tunneld_devices
+        for rsd in await get_tunneld_devices():
+            u = getattr(rsd, "udid", None)
+            if u:
+                tunnel_udids.add(u)
+                seen[u] = {
+                    "udid": u, "name": None,
+                    "iosVersion": getattr(rsd, "product_version", None),
+                    "connection": "wifi", "tunnelReady": True,
+                }
+    except Exception:
+        pass
+
+    # usbmux：USB 與 Network（WiFi 同步）裝置
+    try:
+        from pymobiledevice3.usbmux import list_devices
+        for d in (await _maybe_await(list_devices())) or []:
+            u = getattr(d, "serial", None) or getattr(d, "udid", None)
+            if not u:
+                continue
+            ct = (getattr(d, "connection_type", "") or "").lower()
+            conn = "usb" if "usb" in ct else "wifi"
+            info = seen.get(u) or {
+                "udid": u, "name": None, "iosVersion": None,
+                "connection": conn, "tunnelReady": u in tunnel_udids,
+            }
+            if conn == "usb":
+                info["connection"] = "usb"   # 實體連線優先標示
+            # 盡力補名稱 / 版本（失敗就略過）
+            try:
+                from pymobiledevice3.lockdown import create_using_usbmux
+                ld = await _maybe_await(create_using_usbmux(serial=u, autopair=False))
+                si = getattr(ld, "short_info", None) or {}
+                info["name"] = si.get("DeviceName") or info.get("name")
+                info["iosVersion"] = si.get("ProductVersion") or info.get("iosVersion")
+            except Exception:
+                pass
+            seen[u] = info
+    except Exception as e:
+        emit({"event": "info", "message": f"usbmux 列舉失敗：{e}"})
+
+    emit({"event": "devices", "devices": list(seen.values())})
+    return 0
+
+
+async def wifi_on_action(udid: str | None) -> int:
+    """對指定裝置開啟「透過 WiFi 連線」（等同 pymobiledevice3 lockdown wifi-connections on）。"""
+    try:
+        from pymobiledevice3.lockdown import create_using_usbmux
+        ld = await _maybe_await(create_using_usbmux(serial=udid))
+        try:
+            await _maybe_await(ld.set_enable_wifi_connections(True))   # 9.x 正確方法
+        except AttributeError:
+            try:
+                await _maybe_await(ld.enable_wifi_connections(True))    # 舊版方法
+            except AttributeError:
+                await _maybe_await(
+                    ld.set_value(True, "EnableWifiConnections", "com.apple.mobile.wireless_lockdown")
+                )
+        emit({"event": "wifi-on", "ok": True, "udid": udid})
+        return 0
+    except Exception as e:
+        emit({"event": "wifi-on", "ok": False, "error": str(e)})
+        return 1
+
+
 async def serve(location_sim) -> None:
     """主迴圈：讀取指令、操作 LocationSimulation、回傳結果。"""
     while True:
@@ -155,8 +240,16 @@ if __name__ == "__main__":
     ap.add_argument("--udid", default=None, help="指定裝置 UDID（不指定則用第一台）")
     ap.add_argument("--wait-tunnel", action="store_true",
                     help="多等候一段時間讓 tunnel 建立（App 自動啟動 tunnel 時使用）")
+    ap.add_argument("--list", action="store_true", help="列出可見裝置後結束")
+    ap.add_argument("--wifi-on", action="store_true",
+                    help="對指定裝置開啟 WiFi 連線後結束")
     args = ap.parse_args()
     try:
-        sys.exit(asyncio.run(main(args.udid, args.wait_tunnel)))
+        if args.list:
+            sys.exit(asyncio.run(list_devices_action()))
+        elif getattr(args, "wifi_on", False):
+            sys.exit(asyncio.run(wifi_on_action(args.udid)))
+        else:
+            sys.exit(asyncio.run(main(args.udid, args.wait_tunnel)))
     except KeyboardInterrupt:
         sys.exit(0)
