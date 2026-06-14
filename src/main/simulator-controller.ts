@@ -75,7 +75,6 @@ export class SimulatorController {
     if (this.sessions.has(id)) await this.disconnect(id);
 
     if (platform === 'ios') {
-      if (opts.udid) await this.enableWifi(opts.udid);
       this.send('device:log', '確保 tunnel 就緒中…');
       await this.tunnel.ensureRunning();
     }
@@ -121,6 +120,14 @@ export class SimulatorController {
       udid: id, connected: true, platform,
       name: session.name, connection: session.connection,
     });
+
+    // 連上後在背景啟用裝置的 WiFi 連線設定（持久設定，不需每次連線都等它；
+    // 為 lockdown 操作、與本次 RSD 連線無關）。失敗只記 log，不影響已建立的連線。
+    if (platform === 'ios' && opts.udid) {
+      this.enableWifi(opts.udid).catch((e) =>
+        this.send('device:log', `背景啟用 WiFi 連線失敗（不影響本次連線）：${String(e)}`),
+      );
+    }
   }
 
   async disconnect(id: string): Promise<void> {

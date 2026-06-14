@@ -219,6 +219,12 @@
   .chkline{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--muted);cursor:pointer}
   .chkline input{width:16px;height:16px;accent-color:var(--signal);flex:none;margin:0}
   .modal-section{font-size:11px;color:var(--faint);padding-top:6px}
+  .lic-grid{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;font-size:12.5px}
+  .lic-grid .lk{color:var(--faint)}
+  .lic-grid .lv{color:var(--text)}
+  .lic-grid .lic-mid{display:flex;align-items:center;gap:6px;min-width:0}
+  .lic-grid .lic-mid code{font-family:var(--mono);font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #lic-status.ok{color:var(--signal)}#lic-status.bad{color:var(--stop)}
 
   /* 日誌面板 */
   .log-panel{position:fixed;left:0;bottom:0;width:min(560px,46vw);height:min(300px,42vh);background:var(--panel);border:1px solid var(--border);border-radius:0 14px 0 0;box-shadow:0 -12px 44px rgba(0,0,0,.45);z-index:1500;display:flex;flex-direction:column}
@@ -552,6 +558,17 @@
       </label>
       <label class="chkline"><input type="checkbox" id="set-remember"> 記住上次的地圖視角／模式／裝置</label>
       <label class="chkline"><input type="checkbox" id="set-autotunnel"> 啟動時自動建立 iOS 通道（首次連線較快）</label>
+
+      <div class="modal-section">授權</div>
+      <div class="lic-grid">
+        <span class="lk">狀態</span><span class="lv" id="lic-status">—</span>
+        <span class="lk">到期</span><span class="lv" id="lic-expires">—</span>
+        <span class="lk">備註</span><span class="lv" id="lic-note">—</span>
+        <span class="lk">機器碼</span>
+        <span class="lv lic-mid"><code id="lic-machine">—</code><button class="copy-mini" id="btn-lic-copy" title="複製機器碼"><svg class="ic" style="width:13px;height:13px"><use href="#i-copy"/></svg></button></span>
+      </div>
+      <button class="btn wide" id="btn-lic-replace" style="margin-top:8px">更換授權檔…</button>
+
       <div class="modal-section">資料</div>
       <button class="btn wide" id="btn-backup-export">⭱ 匯出備份（地點＋路線）</button>
       <button class="btn wide" id="btn-backup-import" style="margin-top:8px">⭳ 匯入備份</button>

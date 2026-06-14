@@ -13,6 +13,8 @@ interface SimulatorBridge {
   tunnelStatus(): Promise<boolean>;
   tunnelPrewarm(): Promise<boolean>;
   tunnelRestart(): Promise<boolean>;
+  licenseInfo(): Promise<{ machineId: string; valid: boolean; reason?: string; issuedAt?: string; expires?: string | null; note?: string; devBypass: boolean }>;
+  licenseReplace(): Promise<{ ok: boolean; reason?: string }>;
   onPosition(cb: (p: { udid: string; pos: { lat: number; lng: number }; session: any }) => void): () => void;
   onState(cb: (s: { udid: string; state: string }) => void): () => void;
   onDeviceStatus(cb: (s: any) => void): () => void;

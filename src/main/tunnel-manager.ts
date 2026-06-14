@@ -31,6 +31,7 @@ export class TunnelManager {
   private proc: ChildProcess | null = null;
   private startedByUs = false;
   private launchError: string | null = null;
+  private readonly probeAgent = new http.Agent({ keepAlive: true, maxSockets: 1 });
 
   private readonly py: string;
   private readonly exe?: string;
@@ -46,11 +47,23 @@ export class TunnelManager {
     this.onLog = opts.onLog;
   }
 
-  /** 確保 tunneld 在跑：已在跑就重用，否則啟動並等到就緒。 */
+  /** 確保 tunneld 在跑：我們自己的還活著就重用；否則清掉殘留再啟動到就緒。 */
   async ensureRunning(): Promise<void> {
-    if (await this.isReady()) {
-      this.onLog?.('偵測到既有 tunnel，直接使用');
+    // 我們這次已經起過且還活著 → 直接重用（多裝置時不會互相干擾）
+    if (this.proc && (await this.isReady())) {
       return;
+    }
+    // 埠上有 tunneld，但不是我們這次起的（多半是前次殘留 / 壞掉的）
+    if (await this.isReady()) {
+      if (process.platform === 'darwin') {
+        // macOS 重用以避免重複跳授權
+        this.onLog?.('偵測到既有 tunnel，直接使用');
+        return;
+      }
+      // Windows / Linux：提權是繼承的、重啟無額外成本 → 清掉殘留改用乾淨的
+      this.onLog?.('偵測到殘留 tunneld，清除後重新啟動…');
+      this.killByPort();
+      await this.waitGone(3000);
     }
     this.start();
     await this.waitReady();
@@ -61,20 +74,59 @@ export class TunnelManager {
     return this.isReady();
   }
 
-  /** 強制重啟：關掉自己啟動的，再重新確保就緒。 */
+  /** 強制重啟：關掉自己的 + 清掉埠上任何殘留，再重新確保就緒。 */
   async restart(): Promise<void> {
     this.onLog?.('重啟 tunnel…');
     this.stop();
+    this.killByPort();            // 連非本程序啟動的殘留也清掉
+    await this.waitGone(3000);
     this.launchError = null;
     await this.ensureRunning();
   }
 
-  /** 結束自己啟動的 tunneld（重用既有的不會被關掉）。 */
+  /** 結束自己啟動的 tunneld（Windows 用 taskkill 連子程序一併強制關閉）。 */
   stop(): void {
-    if (this.proc && this.startedByUs) {
-      this.proc.kill();
-      this.proc = null;
-      this.startedByUs = false;
+    if (!this.proc) return;
+    const pid = this.proc.pid;
+    if (process.platform === 'win32' && pid) {
+      try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' }); } catch { /* */ }
+    } else {
+      try { this.proc.kill(); } catch { /* */ }
+    }
+    this.proc = null;
+    this.startedByUs = false;
+  }
+
+  /** 砍掉佔用 tunneld 埠的程序（清前次殘留 / 壞掉的實例）。 */
+  private killByPort(): void {
+    try {
+      if (process.platform === 'win32') {
+        let out = '';
+        try { out = execSync('netstat -ano -p tcp', { encoding: 'utf8' }); } catch { return; }
+        const pids = new Set<string>();
+        for (const line of out.split(/\r?\n/)) {
+          if (line.includes('LISTENING') && line.includes(`:${this.port}`)) {
+            const parts = line.trim().split(/\s+/);
+            const pid = parts[parts.length - 1];
+            if (/^\d+$/.test(pid) && pid !== '0') pids.add(pid);
+          }
+        }
+        for (const pid of pids) {
+          this.onLog?.(`清除佔用埠 ${this.port} 的 tunneld（PID ${pid}）`);
+          try { execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' }); } catch { /* */ }
+        }
+      } else {
+        try { execSync('pkill -f "pymobiledevice3 remote tunneld"', { stdio: 'ignore' }); } catch { /* */ }
+      }
+    } catch { /* */ }
+  }
+
+  /** 等待埠釋放（最多 ms 毫秒）。 */
+  private async waitGone(ms: number): Promise<void> {
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      if (!(await this.isReady())) return;
+      await new Promise((r) => setTimeout(r, 200));
     }
   }
 
@@ -168,7 +220,7 @@ export class TunnelManager {
   private isReady(): Promise<boolean> {
     return new Promise((resolve) => {
       const req = http.get(
-        { host: '127.0.0.1', port: this.port, path: '/', timeout: 1500 },
+        { host: '127.0.0.1', port: this.port, path: '/', timeout: 1500, agent: this.probeAgent },
         (res) => { res.resume(); resolve(true); },
       );
       req.on('error', () => resolve(false));

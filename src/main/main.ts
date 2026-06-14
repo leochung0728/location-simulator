@@ -13,7 +13,7 @@ import { SpotStore, type SpotInput } from './spot-store';
 import { RouteStore, type RouteInput } from './route-store';
 import type { Platform } from './core/device-adapter';
 import type { Route } from './core/movement-engine';
-import { ensureLicensed } from './license';
+import { ensureLicensed, getLicenseInfo, replaceLicense } from './license';
 
 let controller: SimulatorController | null = null;
 let spotStore: SpotStore | null = null;
@@ -82,10 +82,19 @@ function createWindow(): void {
     // 在非該架構的 Mac（Intel）上不能跑，故略過、退回系統 python3 + pymobiledevice3。
     const archOk = process.platform !== 'darwin' || process.arch === 'arm64';
     if (archOk) {
-      const helper = path.join(process.resourcesPath, 'helper', `ios-location-helper${ext}`);
-      if (fs.existsSync(helper)) iosHelperExe = helper;
-      const tunnel = path.join(process.resourcesPath, 'helper', `tunneld${ext}`);
-      if (fs.existsSync(tunnel)) iosTunnelExe = tunnel;
+      const base = path.join(process.resourcesPath, 'helper');
+      // 同時相容兩種凍結版面：
+      //   onedir → resources/helper/<name>/<name><ext>（啟動快，不需每次解壓）
+      //   onefile → resources/helper/<name><ext>（舊版面）
+      const resolveExe = (name: string): string | undefined => {
+        const onedir = path.join(base, name, `${name}${ext}`);
+        if (fs.existsSync(onedir)) return onedir;
+        const onefile = path.join(base, `${name}${ext}`);
+        if (fs.existsSync(onefile)) return onefile;
+        return undefined;
+      };
+      iosHelperExe = resolveExe('ios-location-helper');
+      iosTunnelExe = resolveExe('tunneld');
     }
   }
 
@@ -151,6 +160,8 @@ function registerIpc(): void {
   // 通道狀態 / 重啟
   ipcMain.handle('tunnel:status', () => controller!.tunnelStatus());
   ipcMain.handle('tunnel:prewarm', () => controller!.prewarmTunnel());
+  ipcMain.handle('license:info', () => getLicenseInfo());
+  ipcMain.handle('license:replace', (e) => replaceLicense(BrowserWindow.fromWebContents(e.sender)));
   ipcMain.handle('tunnel:restart', () => controller!.tunnelRestart());
 
   // 庫備份 / 還原

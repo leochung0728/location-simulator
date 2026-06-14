@@ -114,20 +114,83 @@ function isConfigured(): boolean {
   return !PUBLIC_KEY_PEM.includes('REPLACE_WITH_YOUR_PUBLIC_KEY');
 }
 
+export interface LicenseInfo {
+  machineId: string;
+  valid: boolean;
+  reason?: string;
+  issuedAt?: string;
+  expires?: string | null;
+  note?: string;
+  devBypass: boolean;
+}
+
+/** 給 App 內「授權資訊」顯示用。 */
+export function getLicenseInfo(): LicenseInfo {
+  const machineId = getMachineId();
+  const devBypass = !app.isPackaged || process.env.LICENSE_BYPASS === '1';
+  const res = verifyLicense(machineId);
+  let issuedAt: string | undefined;
+  let expires: string | null | undefined;
+  let note: string | undefined;
+  try {
+    const lic = JSON.parse(fs.readFileSync(licensePath(), 'utf8'));
+    issuedAt = lic.issuedAt; expires = lic.expires ?? null; note = lic.note;
+  } catch { /* 無授權檔 */ }
+  return {
+    machineId, devBypass,
+    valid: res.ok,
+    reason: res.ok ? undefined : res.reason,
+    issuedAt, expires: expires ?? null, note,
+  };
+}
+
+/** 執行中更換授權檔（驗證通過才覆蓋；失敗則還原原檔）。 */
+export async function replaceLicense(parentWin: BrowserWindow | null): Promise<{ ok: boolean; reason?: string }> {
+  const r = await dialog.showOpenDialog(parentWin ?? (undefined as never), {
+    title: '選擇授權檔',
+    filters: [{ name: '授權檔', extensions: ['lic', 'json'] }],
+    properties: ['openFile'],
+  });
+  if (r.canceled || !r.filePaths[0]) return { ok: false, reason: '已取消' };
+
+  const p = licensePath();
+  const backup = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null;
+  try {
+    const data = fs.readFileSync(r.filePaths[0], 'utf8');
+    JSON.parse(data);
+    fs.writeFileSync(p, data, 'utf8');
+  } catch (e) {
+    return { ok: false, reason: '讀取/寫入授權檔失敗：' + String(e) };
+  }
+  const v = verifyLicense(getMachineId());
+  if (!v.ok) {
+    if (backup !== null) fs.writeFileSync(p, backup, 'utf8');
+    else { try { fs.unlinkSync(p); } catch { /* */ } }
+    return { ok: false, reason: v.reason };
+  }
+  return { ok: true };
+}
+
+let gateResolve: ((v: boolean) => void) | null = null;
+let passing = false;
+
 /**
  * 啟動時呼叫：通過授權回 true（可繼續建立主視窗）；
- * 否則顯示未授權視窗並回 false（呼叫端不要再建立主視窗）。
+ * 未通過則顯示未授權視窗，待使用者成功匯入後 Promise 才 resolve(true)，
+ * 主流程便無縫接手建立主視窗（不需重啟）。
  */
-export async function ensureLicensed(): Promise<boolean> {
+export function ensureLicensed(): Promise<boolean> {
   // 開發 / 緊急略過
-  if (!app.isPackaged || process.env.LICENSE_BYPASS === '1') return true;
+  if (!app.isPackaged || process.env.LICENSE_BYPASS === '1') return Promise.resolve(true);
 
   const machineId = getMachineId();
   const res = verifyLicense(machineId);
-  if (res.ok) return true;
+  if (res.ok) return Promise.resolve(true);
 
-  showLicenseWindow(machineId, isConfigured() ? res.reason : '應用程式尚未設定授權公鑰');
-  return false;
+  return new Promise<boolean>((resolve) => {
+    gateResolve = resolve;
+    showLicenseWindow(machineId, isConfigured() ? res.reason : '應用程式尚未設定授權公鑰');
+  });
 }
 
 let licenseWin: BrowserWindow | null = null;
@@ -145,10 +208,9 @@ function showLicenseWindow(machineId: string, reason: string): void {
   });
   licenseWin.removeMenu?.();
   licenseWin.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(licenseHtml(machineId, reason)));
-  licenseWin.on('closed', () => { licenseWin = null; if (!relaunching) app.quit(); });
+  // 使用者自行關閉（沒成功匯入）→ 結束 App
+  licenseWin.on('closed', () => { licenseWin = null; if (!passing) app.quit(); });
 }
-
-let relaunching = false;
 
 function registerLicenseIpc(): void {
   if (licenseIpcReady) return;
@@ -179,10 +241,11 @@ function registerLicenseIpc(): void {
       try { fs.unlinkSync(licensePath()); } catch { /* */ }
       return { ok: false, reason: v.reason };
     }
-    // 成功 → 重啟讓正常流程接手
-    relaunching = true;
-    app.relaunch();
-    app.exit(0);
+    // 成功 → 放行主流程、關閉授權視窗（無縫接手，不重啟）
+    passing = true;
+    gateResolve?.(true);
+    gateResolve = null;
+    licenseWin?.close();
     return { ok: true };
   });
 }

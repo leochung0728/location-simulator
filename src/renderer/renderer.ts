@@ -1420,7 +1420,31 @@ $('btn-settings').addEventListener('click', () => {
   ($('set-units') as HTMLSelectElement).value = settings.units;
   ($('set-remember') as HTMLInputElement).checked = settings.rememberLast;
   ($('set-autotunnel') as HTMLInputElement).checked = settings.autoTunnel;
+  refreshLicenseInfo();
   $('settings-overlay').style.display = 'flex';
+});
+
+async function refreshLicenseInfo(): Promise<void> {
+  try {
+    const info = await sim.licenseInfo();
+    const st = $('lic-status');
+    if (info.devBypass) { st.textContent = '開發模式（未驗證）'; st.className = 'lv'; }
+    else if (info.valid) { st.textContent = '有效'; st.className = 'lv ok'; }
+    else { st.textContent = `無效：${info.reason ?? ''}`; st.className = 'lv bad'; }
+    $('lic-expires').textContent = info.expires ? info.expires : '永久';
+    $('lic-note').textContent = info.note ? info.note : '—';
+    $('lic-machine').textContent = info.machineId;
+  } catch { /* ignore */ }
+}
+
+$('btn-lic-copy').addEventListener('click', () => {
+  const v = $('lic-machine').textContent ?? '';
+  if (v && v !== '—') copyText(v, '已複製機器碼');
+});
+$('btn-lic-replace').addEventListener('click', async () => {
+  const r = await sim.licenseReplace();
+  if (r.ok) { flash('授權檔已更新'); refreshLicenseInfo(); }
+  else if (r.reason !== '已取消') flash(`更換失敗：${r.reason}`);
 });
 function closeSettings(): void { $('settings-overlay').style.display = 'none'; }
 $('btn-settings-close').addEventListener('click', closeSettings);

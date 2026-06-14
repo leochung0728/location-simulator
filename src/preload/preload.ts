@@ -34,6 +34,8 @@ const api = {
   tunnelStatus: (): Promise<boolean> => ipcRenderer.invoke('tunnel:status'),
   tunnelPrewarm: (): Promise<boolean> => ipcRenderer.invoke('tunnel:prewarm'),
   tunnelRestart: (): Promise<boolean> => ipcRenderer.invoke('tunnel:restart'),
+  licenseInfo: () => ipcRenderer.invoke('license:info'),
+  licenseReplace: () => ipcRenderer.invoke('license:replace'),
 
   // 事件訂閱（main → renderer）
   onPosition: (cb: (p: unknown) => void) => subscribe('sim:position', cb),
