@@ -247,6 +247,39 @@ async def main(udid: str | None, wait_tunnel: bool = False) -> int:
     return 0
 
 
+async def warm_main() -> int:
+    """
+    預熱模式（4c 暖機備援）：先把重模組 import 進來（import 成本在此先付掉），
+    發出 {"event":"warm"} 後待命；收到 {"cmd":"connect","udid":...,"waitTunnel":...}
+    才真正連線（沿用 main 的流程）。收到 quit 或 stdin 關閉而未被使用就直接結束。
+    """
+    # 預先載入重模組（與 main / resolve 用到的一致），暖好 import 快取
+    import pymobiledevice3.services.dvt.instruments.dvt_provider  # noqa: F401
+    import pymobiledevice3.services.dvt.instruments.location_simulation  # noqa: F401
+    import pymobiledevice3.tunneld.api  # noqa: F401
+    import pymobiledevice3.lockdown  # noqa: F401
+
+    emit({"event": "warm"})
+
+    while True:
+        line = await read_line()
+        if line is None:
+            return 0  # 未被使用就結束
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        cmd = req.get("cmd")
+        if cmd == "connect":
+            return await main(req.get("udid"), bool(req.get("waitTunnel", False)))
+        if cmd == "quit":
+            return 0
+        # 連線前的其他指令一律忽略
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--udid", default=None, help="指定裝置 UDID（不指定則用第一台）")
@@ -255,12 +288,16 @@ if __name__ == "__main__":
     ap.add_argument("--list", action="store_true", help="列出可見裝置後結束")
     ap.add_argument("--wifi-on", action="store_true",
                     help="對指定裝置開啟 WiFi 連線後結束")
+    ap.add_argument("--warm", action="store_true",
+                    help="預熱模式：import 後待命，收到 connect 指令再連線（4c 暖機備援）")
     args = ap.parse_args()
     try:
         if args.list:
             sys.exit(asyncio.run(list_devices_action()))
         elif getattr(args, "wifi_on", False):
             sys.exit(asyncio.run(wifi_on_action(args.udid)))
+        elif getattr(args, "warm", False):
+            sys.exit(asyncio.run(warm_main()))
         else:
             sys.exit(asyncio.run(main(args.udid, args.wait_tunnel)))
     except KeyboardInterrupt:

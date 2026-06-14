@@ -16,6 +16,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as readline from 'node:readline';
 import type { Coordinate } from '../core/movement-engine';
 import type { DeviceAdapter } from '../core/device-adapter';
+import type { WarmHandle } from '../warm-pool';
 
 export interface IOSAdapterOptions {
   pythonPath?: string;        // python 執行檔，預設 'python3'
@@ -24,6 +25,7 @@ export interface IOSAdapterOptions {
   waitTunnel?: boolean;       // 傳 --wait-tunnel，讓 helper 多等 tunnel 建立
   udid?: string;              // 指定裝置；不給則用第一台
   connectTimeoutMs?: number;  // 等待 ready 的逾時，預設 30s
+  warm?: WarmHandle;          // 暖機備援行程（4c）：有的話直接接管、送 connect 指令
   onLog?: (msg: string) => void;
 }
 
@@ -44,6 +46,7 @@ export class IOSAdapter implements DeviceAdapter {
   private readonly waitTunnel: boolean;
   private readonly udid?: string;
   private readonly timeout: number;
+  private warm?: WarmHandle;
   private readonly onLog?: (msg: string) => void;
 
   constructor(opts: IOSAdapterOptions = {}) {
@@ -53,6 +56,7 @@ export class IOSAdapter implements DeviceAdapter {
     this.waitTunnel = opts.waitTunnel ?? false;
     this.udid = opts.udid;
     this.timeout = opts.connectTimeoutMs ?? 30_000;
+    this.warm = opts.warm;
     this.onLog = opts.onLog;
   }
 
@@ -63,14 +67,28 @@ export class IOSAdapter implements DeviceAdapter {
   connect(_method: 'usb' | 'wifi' = 'usb'): Promise<void> {
     if (this.proc) return Promise.resolve();
 
-    // 有凍結 exe 就直接 spawn 它（自帶 Python）；否則用 python 跑腳本
-    const command = this.helperExe ?? this.py;
-    const args = this.helperExe ? [] : [this.script];
-    if (this.waitTunnel) args.push('--wait-tunnel');
-    if (this.udid) args.push('--udid', this.udid);
-    const proc = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let proc: ChildProcessWithoutNullStreams;
+    let rl: readline.Interface;
+    if (this.warm && this.warm.proc.exitCode === null) {
+      // 4c：接管暖機備援行程（已 import 完成），送出 connect 指令開始連線
+      proc = this.warm.proc;
+      rl = this.warm.rl;
+      this.warm = undefined;
+      this.onLog?.('使用暖機行程連線');
+      proc.stdin.write(
+        JSON.stringify({ cmd: 'connect', udid: this.udid, waitTunnel: this.waitTunnel }) + '\n',
+      );
+    } else {
+      // 沒有可用備援 → 退回現場 spawn（自帶 Python 的凍結 exe，或 python + 腳本）
+      this.warm = undefined;
+      const command = this.helperExe ?? this.py;
+      const args = this.helperExe ? [] : [this.script];
+      if (this.waitTunnel) args.push('--wait-tunnel');
+      if (this.udid) args.push('--udid', this.udid);
+      proc = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+      rl = readline.createInterface({ input: proc.stdout });
+    }
     this.proc = proc;
-    const rl = readline.createInterface({ input: proc.stdout });
     this.rl = rl;
 
     proc.stderr.on('data', (d) => this.onLog?.(`[helper stderr] ${String(d).trim()}`));
@@ -120,8 +138,16 @@ export class IOSAdapter implements DeviceAdapter {
 
   /** 結束 helper（helper 會在收到 quit 時自動清除定位）。 */
   async disconnect(): Promise<void> {
-    if (this.proc) {
+    const proc = this.proc;
+    if (proc) {
       try { await this.request('quit', {}); } catch { /* 程序可能已結束 */ }
+      // 等 helper 自行收尾退出（讓它乾淨關閉 RSD 連線，避免突然斷線干擾 tunneld），
+      // 最多等 ~2s 再強制清理。
+      await new Promise<void>((resolve) => {
+        if (proc.exitCode !== null) return resolve();
+        const t = setTimeout(resolve, 2000);
+        proc.once('exit', () => { clearTimeout(t); resolve(); });
+      });
     }
     this.teardown();
   }

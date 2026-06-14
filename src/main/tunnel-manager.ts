@@ -31,6 +31,9 @@ export class TunnelManager {
   private proc: ChildProcess | null = null;
   private startedByUs = false;
   private launchError: string | null = null;
+  private wantRunning = false;        // 我們希望 tunneld 保持運行（用於決定是否自動重啟）
+  private intentionalStop = false;    // 刻意關閉（stop/restart/關閉 App）時抑制自動重啟
+  private reviveAttempts = 0;         // 連續自動重啟次數（指數退避用）
   private readonly probeAgent = new http.Agent({ keepAlive: true, maxSockets: 1 });
 
   private readonly py: string;
@@ -49,6 +52,8 @@ export class TunnelManager {
 
   /** 確保 tunneld 在跑：我們自己的還活著就重用；否則清掉殘留再啟動到就緒。 */
   async ensureRunning(): Promise<void> {
+    this.wantRunning = true;
+    this.intentionalStop = false;
     // 我們這次已經起過且還活著 → 直接重用（多裝置時不會互相干擾）
     if (this.proc && (await this.isReady())) {
       return;
@@ -86,6 +91,7 @@ export class TunnelManager {
 
   /** 結束自己啟動的 tunneld（Windows 用 taskkill 連子程序一併強制關閉）。 */
   stop(): void {
+    this.intentionalStop = true;   // 抑制 exit handler 的自動重啟
     if (!this.proc) return;
     const pid = this.proc.pid;
     if (process.platform === 'win32' && pid) {
@@ -152,7 +158,27 @@ export class TunnelManager {
       this.onLog?.(`tunneld 已結束（code ${code}）`);
       this.proc = null;
       this.startedByUs = false;
+      this.maybeRevive(code);
     });
+  }
+
+  /** tunneld 非預期結束時自動重啟（指數退避；正常結束/刻意關閉不重啟；連續失敗則放棄）。 */
+  private maybeRevive(code: number | null): void {
+    if (this.intentionalStop || !this.wantRunning) return;
+    if (code === 0) return; // 正常結束不重啟
+    if (this.reviveAttempts >= 5) {
+      this.onLog?.('tunneld 連續重啟失敗，已停止自動重啟（可手動按「重啟 tunnel」）');
+      return;
+    }
+    const delay = Math.min(1000 * 2 ** this.reviveAttempts, 8000); // 1,2,4,8,8…秒
+    this.reviveAttempts++;
+    this.onLog?.(`tunneld 非預期結束，${Math.round(delay / 1000)}s 後自動重啟…`);
+    setTimeout(() => {
+      if (this.intentionalStop || this.proc) return;
+      this.killByPort();
+      this.start();
+      void this.waitReady().catch((e) => this.onLog?.(`自動重啟失敗：${String(e)}`));
+    }, delay);
   }
 
   /**
@@ -232,6 +258,7 @@ export class TunnelManager {
     const deadline = Date.now() + this.timeout;
     while (Date.now() < deadline) {
       if (await this.isReady()) {
+        this.reviveAttempts = 0;   // 成功就緒 → 重置自動重啟退避
         this.onLog?.('tunnel 已就緒');
         return;
       }

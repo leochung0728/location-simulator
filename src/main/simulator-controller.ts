@@ -16,6 +16,7 @@ import type { DeviceAdapter, Platform } from './core/device-adapter';
 import { IOSAdapter } from './adapters/ios-adapter';
 import { AndroidAdapter } from './adapters/android-adapter';
 import { TunnelManager } from './tunnel-manager';
+import { WarmPool } from './warm-pool';
 
 export interface IosDevice {
   udid: string;
@@ -51,6 +52,7 @@ export class SimulatorController {
   private readonly sessions = new Map<string, DeviceSession>();
   private readonly py = process.platform === 'win32' ? 'py' : 'python3';
   private readonly tunnel: TunnelManager;
+  private readonly warmPool: WarmPool;
 
   constructor(
     private readonly win: BrowserWindow,
@@ -61,6 +63,13 @@ export class SimulatorController {
       tunnelExe: opts.iosTunnelExe,
       onLog: (m) => this.send('device:log', m),
     });
+    // 4c：暖機備援行程池（先養一支已 import 好的 helper，連線時接管以省 import 成本）
+    this.warmPool = new WarmPool({
+      command: opts.iosHelperExe ?? this.py,
+      baseArgs: opts.iosHelperExe ? [] : [opts.iosScriptPath],
+      onLog: (m) => this.send('device:log', m),
+    });
+    this.warmPool.prewarm();
   }
 
   private sessionId(platform: Platform, opts: ConnectOpts): string {
@@ -80,6 +89,7 @@ export class SimulatorController {
     }
 
     const engine = new MovementEngine(1000);
+    const warm = platform === 'ios' ? ((await this.warmPool.acquire()) ?? undefined) : undefined;
     const adapter: DeviceAdapter =
       platform === 'ios'
         ? new IOSAdapter({
@@ -88,6 +98,7 @@ export class SimulatorController {
             helperExe: this.opts.iosHelperExe,
             waitTunnel: true,
             udid: opts.udid,
+            warm,
             onLog: (m) => this.send('device:log', `[${opts.name ?? id}] ${m}`),
           })
         : new AndroidAdapter({ serial: opts.udid });
@@ -137,15 +148,13 @@ export class SimulatorController {
     await session.adapter.disconnect().catch(() => undefined);
     this.sessions.delete(id);
     this.send('device:status', { udid: id, connected: false });
-
-    // 沒有任何 iOS 工作階段時才收掉共用 tunnel
-    if (![...this.sessions.values()].some((s) => s.platform === 'ios')) {
-      this.tunnel.stop();
-    }
+    // 註：不在此收掉共用 tunneld —— 它在啟動時已預熱、為所有 iOS 工作階段共用，
+    // 保持存活可讓「中斷後重連」免去冷啟動。tunneld 只在 App 關閉（shutdown）時收掉。
   }
 
   /** App 結束時呼叫：斷開所有裝置並收掉 tunnel。 */
   async shutdown(): Promise<void> {
+    this.warmPool.dispose();
     for (const id of [...this.sessions.keys()]) {
       await this.disconnect(id).catch(() => undefined);
     }
