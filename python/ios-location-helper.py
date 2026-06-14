@@ -52,6 +52,7 @@ async def resolve_service_provider(udid: str | None, wait_tunnel: bool = False):
 
     # ── iOS 17+：tunneld / RSD（必要時輪詢等待）──
     deadline = _time.monotonic() + (25.0 if wait_tunnel else 1.0)
+    delay = 0.25
     while True:
         try:
             if udid:
@@ -65,7 +66,8 @@ async def resolve_service_provider(udid: str | None, wait_tunnel: bool = False):
             pass
         if _time.monotonic() >= deadline:
             break
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(delay)
+        delay = min(delay * 1.5, 2.0)   # 漸進退讓：0.25→0.375→…→上限 2s（快取得、又不洪水）
 
     emit({"event": "info", "message": "未偵測到 tunnel，改用 usbmux"})
 
@@ -114,7 +116,8 @@ async def list_devices_action() -> int:
     except Exception:
         pass
 
-    # usbmux：USB 與 Network（WiFi 同步）裝置
+    # usbmux：USB 與 Network（WiFi 同步）裝置（先建條目，名稱/版本稍後並行補）
+    usbmux_udids: list[str] = []
     try:
         from pymobiledevice3.usbmux import list_devices
         for d in (await _maybe_await(list_devices())) or []:
@@ -129,18 +132,27 @@ async def list_devices_action() -> int:
             }
             if conn == "usb":
                 info["connection"] = "usb"   # 實體連線優先標示
-            # 盡力補名稱 / 版本（失敗就略過）
-            try:
-                from pymobiledevice3.lockdown import create_using_usbmux
-                ld = await _maybe_await(create_using_usbmux(serial=u, autopair=False))
-                si = getattr(ld, "short_info", None) or {}
-                info["name"] = si.get("DeviceName") or info.get("name")
-                info["iosVersion"] = si.get("ProductVersion") or info.get("iosVersion")
-            except Exception:
-                pass
             seen[u] = info
+            if u not in usbmux_udids:
+                usbmux_udids.append(u)
     except Exception as e:
         emit({"event": "info", "message": f"usbmux 列舉失敗：{e}"})
+
+    # 並行補名稱 / 版本：每台各一次 lockdown，平行做以縮短多台時的總時間。
+    async def _fill_info(u: str) -> None:
+        try:
+            from pymobiledevice3.lockdown import create_using_usbmux
+            ld = await _maybe_await(create_using_usbmux(serial=u, autopair=False))
+            si = getattr(ld, "short_info", None) or {}
+            if si.get("DeviceName"):
+                seen[u]["name"] = si.get("DeviceName")
+            if si.get("ProductVersion"):
+                seen[u]["iosVersion"] = si.get("ProductVersion")
+        except Exception:
+            pass
+
+    if usbmux_udids:
+        await asyncio.gather(*[_fill_info(u) for u in usbmux_udids])
 
     emit({"event": "devices", "devices": list(seen.values())})
     return 0

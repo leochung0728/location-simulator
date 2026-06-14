@@ -1347,7 +1347,9 @@ async function refreshDevices(): Promise<void> {
   const btn = $('btn-dev-refresh') as HTMLButtonElement;
   btn.disabled = true;
   btn.textContent = '掃描中…';
-  $('dev-list').innerHTML = '<div class="dev-empty">掃描中…</div>';
+  // 有快取就先即時顯示（不清空成「掃描中」），背景再刷新；無快取才顯示掃描中
+  if (iosDevices.length > 0) renderDevices();
+  else $('dev-list').innerHTML = '<div class="dev-empty">掃描中…</div>';
   let list: IosDevice[] = [];
   try { list = await sim.listDevices(); } catch { list = []; }
   iosDevices = list;
@@ -1399,6 +1401,13 @@ $('dev-list').addEventListener('click', (e) => {
   connectDevice('ios', { udid: row.dataset.udid, name: dev?.name ?? row.dataset.udid, connection: dev?.connection });
 });
 $('btn-dev-refresh').addEventListener('click', () => { if (!connectingId) refreshDevices(); });
+
+// 主程式啟動暖機後會背景推送一次裝置清單 → 暖快取；彈窗開著時即時更新
+sim.onDevices((list) => {
+  if (scanning) return;                              // 正在主動掃描就不覆蓋
+  iosDevices = (list as IosDevice[]) ?? [];
+  if ($('add-device-overlay').style.display !== 'none') renderDevices();
+});
 
 /* ════════════════════════════════════════════════════════
    設定彈窗

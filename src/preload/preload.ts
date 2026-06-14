@@ -42,6 +42,7 @@ const api = {
   onState: (cb: (s: string) => void) => subscribe('sim:state', cb),
   onDeviceStatus: (cb: (s: unknown) => void) => subscribe('device:status', cb),
   onDeviceLog: (cb: (m: string) => void) => subscribe('device:log', cb),
+  onDevices: (cb: (list: unknown) => void) => subscribe('device:devices', cb),
 };
 
 contextBridge.exposeInMainWorld('simulator', api);

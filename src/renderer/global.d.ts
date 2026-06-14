@@ -19,6 +19,7 @@ interface SimulatorBridge {
   onState(cb: (s: { udid: string; state: string }) => void): () => void;
   onDeviceStatus(cb: (s: any) => void): () => void;
   onDeviceLog(cb: (m: string) => void): () => void;
+  onDevices(cb: (list: IosDevice[]) => void): () => void;
 }
 
 interface BackupBridge {

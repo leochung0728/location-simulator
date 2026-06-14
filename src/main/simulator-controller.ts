@@ -248,11 +248,20 @@ export class SimulatorController {
       this.send('device:log', '啟動時預先建立 tunnel…');
       await this.tunnel.ensureRunning();
       this.send('device:log', 'tunnel 已就緒');
+      void this.scanAndPush();   // 背景暖快取，不阻塞 prewarm 回傳
       return true;
     } catch (e) {
       this.send('device:log', `tunnel 預先建立失敗（連線時會再試）：${String(e)}`);
       return false;
     }
+  }
+
+  /** 背景掃描裝置並推給前端（暖快取，讓開啟「連接裝置」時即時顯示）。 */
+  private async scanAndPush(): Promise<void> {
+    try {
+      const list = await this.listDevices();
+      this.send('device:devices', list);
+    } catch { /* 背景 best-effort，忽略 */ }
   }
 
   /** 查詢 tunnel 狀態（true=就緒）。 */
