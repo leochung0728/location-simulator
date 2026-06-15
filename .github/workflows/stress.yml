@@ -1,0 +1,56 @@
+name: Stress (multi-device logic)
+
+# 用途：每次 push / PR 自動跑多裝置壓測（假 helper，不需真機 / Electron / 管理員），
+# 當作 WarmPool / IOSAdapter / 中斷流程等「並行與生命週期邏輯」的回歸防護。
+# 注意：這只驗我們自己的行程編排邏輯，不驗真實 pymobiledevice3 路徑（那是真機 soak 的事）。
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - '.github/workflows/stress.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - '.github/workflows/stress.yml'
+
+# 同一分支有新 push 時取消尚在跑的舊任務
+concurrency:
+  group: stress-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stress:
+    name: stress (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # 同時在 Linux（快）與 Windows（實際目標 OS，spawn/kill 語意不同）跑。
+        # 想更精簡可只留 ubuntu-latest。
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # --ignore-scripts：跳過 postinstall（含 Electron 二進位下載），壓測不需要它，
+      # 也避開 allow-scripts / lavamoat 在 CI 上的問題。tsc 仍可拿到 electron 的型別。
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Run multi-device stress test
+        run: npm run stress

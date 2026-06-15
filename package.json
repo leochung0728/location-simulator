@@ -19,7 +19,8 @@
     "dist": "npm run protect && electron-builder",
     "dist:mac": "npm run protect && electron-builder --mac",
     "dist:win": "npm run protect && electron-builder --win",
-    "dist:linux": "npm run protect && electron-builder --linux"
+    "dist:linux": "npm run protect && electron-builder --linux",
+    "stress": "tsc && node test/stress-multidevice.cjs"
   },
   "devDependencies": {
     "@types/node": "^20.19.42",
